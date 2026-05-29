@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, field_validator
 import re
 
 class RegisterRequest(BaseModel):
@@ -7,7 +7,8 @@ class RegisterRequest(BaseModel):
     full_name: str
     password: str
 
-    @validator("phone_number")
+    @field_validator("phone_number")
+    @classmethod
     def validate_kenyan_phone(cls, v):
         # Accept +254XXXXXXXXX or 07XXXXXXXX or 01XXXXXXXX
         pattern = r'^(\+254|0)[17]\d{8}$'
@@ -18,7 +19,8 @@ class RegisterRequest(BaseModel):
             v = "+254" + v[1:]
         return v
 
-    @validator("password")
+    @field_validator("password")
+    @classmethod
     def validate_password(cls, v):
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters")

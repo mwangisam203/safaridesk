@@ -4,7 +4,7 @@ from app.models.user import User
 from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
 from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token
 
-async def register_user(request: RegisterRequest, db: Session) -> User:
+def register_user(request: RegisterRequest, db: Session) -> User:
     # Check email not already registered
     if db.query(User).filter(User.email == request.email).first():
         raise HTTPException(
@@ -36,7 +36,7 @@ async def register_user(request: RegisterRequest, db: Session) -> User:
 
     return user
 
-async def login_user(request: LoginRequest, db: Session) -> TokenResponse:
+def login_user(request: LoginRequest, db: Session) -> TokenResponse:
     user = db.query(User).filter(User.email == request.email).first()
 
     if not user or not verify_password(request.password, user.hashed_password):
