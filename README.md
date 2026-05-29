@@ -56,3 +56,12 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000
 
 ## Install/Sync Dependencies
 uv sync
+
+
+##postgres use keys
+q       quit
+Space   next page
+b       previous page
+Enter   move down one line
+/word   search for word
+n       next search result

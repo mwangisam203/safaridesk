@@ -37,9 +37,13 @@ def register_user(request: RegisterRequest, db: Session) -> User:
     return user
 
 def login_user(request: LoginRequest, db: Session) -> TokenResponse:
-    user = db.query(User).filter(User.email == request.email).first()
+    return login_user_by_email(request.email, request.password, db)
 
-    if not user or not verify_password(request.password, user.hashed_password):
+
+def login_user_by_email(email: str, password: str, db: Session) -> TokenResponse:
+    user = db.query(User).filter(User.email == email).first()
+
+    if not user or not verify_password(password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
