@@ -5,6 +5,7 @@ from app.db.session import get_db
 from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
 from app.schemas.user import UserResponse
 from app.services.auth_service import register_user, login_user, login_user_by_email
+from app.services.email_service import send_test_email
 from app.core.dependencies import get_current_user
 from app.models.user import User
 
@@ -39,3 +40,10 @@ async def logout(current_user: User = Depends(get_current_user)):
     # With JWT, logout is handled client-side (delete the token)
     # For proper server-side logout, add token to a Redis blacklist
     return {"message": "Logged out successfully"}
+
+
+@router.post("/test-email")
+def test_email(to_email: str):
+    """Send a test email to Mailtrap."""
+    send_test_email(to_email)
+    return {"message": "Test email sent"}
