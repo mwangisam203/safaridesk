@@ -1,0 +1,114 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# ===========================
+# ENVIRONMENT & SECRETS
+# ===========================
+.env
+.env.local
+.env.production
+.env.staging
+.env.*.local
+*.pem          # AWS key pairs — never commit these
+*.key
+
+# ===========================
+# PYTHON
+# ===========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ===========================
+# VIRTUAL ENVIRONMENTS
+# ===========================
+.venv/
+venv/
+env/
+ENV/
+
+# ===========================
+# UV SPECIFIC
+# ===========================
+.uv/
+uv.lock        # optional — some teams commit this, some don't
+                # for solo projects, committing it ensures reproducible installs
+                # uncomment the line below to ignore it
+# uv.lock
+
+# ===========================
+# TESTING
+# ===========================
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.coveragerc
+.tox/
+
+# ===========================
+# DATABASE
+# ===========================
+*.db
+*.sqlite3
+*.sqlite
+
+# ===========================
+# DOCKER
+# ===========================
+*.log
+docker-compose.override.yml
+
+# ===========================
+# IDE & EDITORS
+# ===========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ===========================
+# ALEMBIC
+# ===========================
+# Don't ignore alembic/versions — you WANT migrations committed
+# alembic/versions/   <-- DO NOT add this
+
+# ===========================
+# UPLOADS & MEDIA
+# ===========================
+uploads/
+media/
+static/collected/
+
+# ===========================
+# AWS
+# ===========================
+.aws/
+*.pem
+*.p12
+
+# ===========================
+# CELERY
+# ===========================
+celerybeat-schedule
+celerybeat.pid
