@@ -43,3 +43,16 @@ uv run uvicorn main:app --reload
 
 Visit http://localhost:8000/docs for the API documentation.
 
+
+uv run uvicorn main:app --reload
+uv run uvicorn main:app --reload --port 8080
+
+
+#  Expose To Other Devices
+uv run uvicorn main:app --reload --host 0.0.0.0
+
+#  Production-ish Run
+uv run uvicorn main:app --host 0.0.0.0 --port 8000
+
+## Install/Sync Dependencies
+uv sync
