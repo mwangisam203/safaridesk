@@ -1,10 +1,32 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.core.config import settings
+from app.api.v1 import auth  # import more routers as you build them
 
+app = FastAPI(
+    title=settings.APP_NAME,
+    description="Paid Technical Knowledge Platform for African Developers",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
 
+# CORS — controls which domains can call your API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Add your frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-app = FastAPI()
+# Include routers — add more here as you build each feature
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 
 @app.get("/")
-def home():
-    return {" message": "I think there is something I am forgetting"}
+async def root():
+    return {"message": f"Welcome to {settings.APP_NAME}", "status": "running"}
 
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
