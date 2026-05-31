@@ -19,7 +19,7 @@ class AuditLog(Base):
     entity_id = Column(String, nullable=True)     # The ID of the affected record
 
     # Full context of the action
-    metadata = Column(JSONB, nullable=True)
+    log_metadata = Column(JSONB, nullable=True)
 
     # Request context
     ip_address = Column(String, nullable=True)
