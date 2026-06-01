@@ -5,7 +5,7 @@ from app.api.v1 import auth  # import more routers as you build them
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Paid Technical Knowledge Platform for African Developers",
+    description="Paid Technical Knowledge Platform for Developers",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
