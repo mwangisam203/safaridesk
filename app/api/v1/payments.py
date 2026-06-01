@@ -7,7 +7,7 @@ from app.models.transaction import Transaction
 from app.services.mpesa_service import MpesaService
 from app.services.subscription_service import SubscriptionService
 from app.schemas.payments import STKPushRequest, STKPushResponse
-from app.core.audit import log_action  # you likely have this already
+#from app.core.audit import log_action  #
 import logging
 
 router = APIRouter(prefix="/payments", tags=["Payments"])

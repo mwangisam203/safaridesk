@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1 import auth  # import more routers as you build them
+from app.api.v1.payments import router as payments_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -22,6 +23,8 @@ app.add_middleware(
 
 # Include routers — add more here as you build each feature
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+
+app.include_router(payments_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
