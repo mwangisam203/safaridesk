@@ -16,7 +16,7 @@ import logging
 router = APIRouter(prefix="/payments", tags=["Payments"])
 mpesa  = MpesaService()
 
-TIER_PRICES = {"basic": 500, "pro": 1200}   # KES
+TIER_PRICES = {"basic": 1, "pro": 5}   # KES
 
 @router.post("/stk-push", response_model=STKPushResponse)
 async def initiate_payment(
