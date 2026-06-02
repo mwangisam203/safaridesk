@@ -91,12 +91,15 @@ async def mpesa_callback(request: Request, db: Session = Depends(get_db)):
 
             # Fire-and-forget email (Celery)
             from app.tasks.email_tasks import send_payment_confirmation
-            send_payment_confirmation.delay(txn.user_id, txn.mpesa_receipt, txn.amount)
+            send_payment_confirmation.delay(txn.user_id, txn.mpesa_receipt, str(txn.amount))
 
         else:
             txn.status       = "FAILED"
             txn.failure_reason = stk_callback["ResultDesc"]
             db.commit()
+
+            from app.tasks.email_tasks import send_payment_failed
+            send_payment_failed.delay(txn.user_id, str(txn.amount), txn.failure_reason)
 
     except Exception as e:
         logging.error(f"Callback processing error: {e}")
