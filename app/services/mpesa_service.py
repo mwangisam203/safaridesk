@@ -10,7 +10,7 @@ class MpesaService:
 
     @property
     def base_url(self):
-        return SANDBOX_BASE if settings.MPESA_ENV == "sandbox" else PROD_BASE
+        return SANDBOX_BASE if settings.MPESA_ENVIRONMENT == "sandbox" else PROD_BASE
 
     async def get_access_token(self) -> str:
         credentials = base64.b64encode(
@@ -26,7 +26,7 @@ class MpesaService:
             return r.json()["access_token"]
 
     def _generate_password(self, timestamp: str) -> str:
-        raw = f"{settings.MPESA_SHORTCODE}{settings.MPESA_PASSKEY}{timestamp}"
+        raw = f"{settings.MPESA_BUSINESS_SHORT_CODE}{settings.MPESA_PASSKEY}{timestamp}"
         return base64.b64encode(raw.encode()).decode()
 
     async def initiate_stk_push(
@@ -40,13 +40,13 @@ class MpesaService:
         phone_normalized = phone.lstrip("+")
 
         payload = {
-            "BusinessShortCode": settings.MPESA_SHORTCODE,
+            "BusinessShortCode": settings.MPESA_BUSINESS_SHORT_CODE,
             "Password": password,
             "Timestamp": timestamp,
             "TransactionType": "CustomerPayBillOnline",
             "Amount": amount,
             "PartyA": phone_normalized,
-            "PartyB": settings.MPESA_SHORTCODE,
+            "PartyB": settings.MPESA_BUSINESS_SHORT_CODE,
             "PhoneNumber": phone_normalized,
             "CallBackURL": settings.MPESA_CALLBACK_URL,
             "AccountReference": account_ref,   # e.g. "SAFARIDESK-SUB"
