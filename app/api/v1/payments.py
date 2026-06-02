@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.core.dependencies import get_current_user
+from app.models.subscription import SubscriptionTierInfo
 from app.models.user import User
-from app.models.transaction import Transaction
+from app.models.transaction import Transaction, TransactionStatus, TransactionType
 from app.services.mpesa_service import MpesaService
 from app.services.subscription_service import SubscriptionService
 from app.schemas.payments import STKPushRequest, STKPushResponse
@@ -21,13 +24,14 @@ async def initiate_payment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    amount = TIER_PRICES[body.tier]
+    tier = SubscriptionTierInfo(body.tier.value)
+    amount = TIER_PRICES[tier.value]
     try:
         result = await mpesa.initiate_stk_push(
             phone=current_user.phone_number,
             amount=amount,
             account_ref="SAFARIDESK-SUB",
-            description=f"{body.tier.upper()} subscription",
+            description=f"{tier.value.upper()} subscription",
         )
     except Exception as e:
         logging.error(f"STK Push failed: {e}")
@@ -39,12 +43,15 @@ async def initiate_payment(
     # Persist pending transaction
     txn = Transaction(
         user_id=current_user.id,
-        checkout_request_id=result["CheckoutRequestID"],
+        mpesa_request_id=result["CheckoutRequestID"],
         merchant_request_id=result["MerchantRequestID"],
         amount=amount,
-        tier=body.tier,
-        status="PENDING",
+        tier=tier,
+        transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
+        status=TransactionStatus.PENDING,
         phone_number=current_user.phone_number,
+        mpesa_response_code=result.get("ResponseCode"),
+        mpesa_response_description=result.get("ResponseDescription"),
     )
     db.add(txn)
     db.commit()
@@ -68,34 +75,39 @@ async def mpesa_callback(request: Request, db: Session = Depends(get_db)):
         result_code  = stk_callback["ResultCode"]
 
         txn = db.query(Transaction).filter_by(
-            checkout_request_id=checkout_id
+            mpesa_request_id=checkout_id
         ).first()
 
         if not txn:
             return {"ResultCode": 0, "ResultDesc": "Accepted"}  # unknown, ignore
 
-        if txn.status != "PENDING":
+        if txn.status != TransactionStatus.PENDING:
             return {"ResultCode": 0, "ResultDesc": "Accepted"}  # idempotency guard
+
+        txn.raw_callback = payload
+        txn.mpesa_response_code = str(result_code)
+        txn.mpesa_response_description = stk_callback.get("ResultDesc")
 
         if result_code == 0:
             # Extract M-Pesa receipt from metadata
             items = stk_callback.get("CallbackMetadata", {}).get("Item", [])
             meta  = {i["Name"]: i.get("Value") for i in items}
 
-            txn.status      = "COMPLETED"
-            txn.mpesa_receipt = meta.get("MpesaReceiptNumber")
+            txn.status = TransactionStatus.COMPLETED
+            txn.mpesa_receipt_number = meta.get("MpesaReceiptNumber")
+            txn.completed_at = datetime.now(timezone.utc)
             db.commit()
 
             # Upgrade subscription
-            SubscriptionService(db).activate(txn.user_id, txn.tier)
+            SubscriptionService(db).activate(txn.user_id, txn.tier.value)
 
             # Fire-and-forget email (Celery)
             from app.tasks.email_tasks import send_payment_confirmation
-            send_payment_confirmation.delay(txn.user_id, txn.mpesa_receipt, str(txn.amount))
+            send_payment_confirmation.delay(txn.user_id, txn.mpesa_receipt_number, str(txn.amount))
 
         else:
-            txn.status       = "FAILED"
-            txn.failure_reason = stk_callback["ResultDesc"]
+            txn.status = TransactionStatus.FAILED
+            txn.failure_reason = stk_callback.get("ResultDesc")
             db.commit()
 
             from app.tasks.email_tasks import send_payment_failed

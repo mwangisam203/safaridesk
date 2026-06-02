@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime, Enum, ForeignKey, Nume
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from app.db.base import Base
+from app.models.subscription import SubscriptionTierInfo
 import enum
 
 class TransactionStatus(str, enum.Enum):
@@ -25,12 +26,14 @@ class Transaction(Base):
 
     # M-Pesa specific fields
     mpesa_request_id = Column(String, unique=True, index=True)  # CheckoutRequestID
+    merchant_request_id = Column(String, nullable=True, index=True)
     mpesa_receipt_number = Column(String, unique=True, nullable=True, index=True)
     # ^^^ This is your IDEMPOTENCY KEY — unique per completed transaction
 
     phone_number = Column(String, nullable=False)
     amount = Column(Numeric(10, 2), nullable=False)
     currency = Column(String, default="KES")
+    tier = Column(Enum(SubscriptionTierInfo), nullable=True)
 
     transaction_type = Column(Enum(TransactionType))
     status = Column(Enum(TransactionStatus), default=TransactionStatus.INITIATED)
@@ -38,6 +41,7 @@ class Transaction(Base):
     # M-Pesa response details
     mpesa_response_code = Column(String, nullable=True)
     mpesa_response_description = Column(Text, nullable=True)
+    failure_reason = Column(Text, nullable=True)
 
     # Raw M-Pesa callback stored as JSON — always keep the raw response
     raw_callback = Column(JSONB, nullable=True)
