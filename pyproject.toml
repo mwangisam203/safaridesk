@@ -14,10 +14,16 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "psycopg2-binary>=2.9.12",
     "pydantic-settings>=2.14.1",
+    "pytest>=9.0.3",
     "python-dotenv>=1.2.2",
     "python-jose[cryptography]>=3.5.0",
     "python-multipart>=0.0.29",
     "redis>=8.0.0",
     "sqlalchemy>=2.0.50",
     "uvicorn>=0.48.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
 ]
