@@ -26,9 +26,11 @@ async def initiate_payment(
 ):
     tier = SubscriptionTierInfo(body.tier.value)
     amount = TIER_PRICES[tier.value]
+    payment_phone = body.phone_number or current_user.phone_number
+
     try:
         result = await mpesa.initiate_stk_push(
-            phone=current_user.phone_number,
+            phone=payment_phone,
             amount=amount,
             account_ref="SAFARIDESK-SUB",
             description=f"{tier.value.upper()} subscription",
@@ -49,7 +51,7 @@ async def initiate_payment(
         tier=tier,
         transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
         status=TransactionStatus.PENDING,
-        phone_number=current_user.phone_number,
+        phone_number=payment_phone,
         mpesa_response_code=result.get("ResponseCode"),
         mpesa_response_description=result.get("ResponseDescription"),
     )
