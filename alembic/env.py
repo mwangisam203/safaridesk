@@ -11,6 +11,7 @@ from app.models.transaction import Transaction
 from app.models.audit_log import AuditLog
 from app.models.article import Article
 from app.models.free_article_read import FreeArticleRead
+from app.models.anonymous_read import AnonymousRead, AnonymousEmail
 from app.db.base import Base
 
 
