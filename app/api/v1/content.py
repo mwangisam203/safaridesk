@@ -179,3 +179,45 @@ def delete_article(
 
     db.delete(article)
     db.commit()
+
+
+# ── Search articles ───────────────────────────────────────────────────────────
+@router.get("/articles/search", response_model=list[ArticleListItem])
+def search_articles(
+    q: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Search articles by keyword in title, summary or body.
+    FREE users see BASIC results only.
+    """
+    if len(q.strip()) < 2:
+        raise HTTPException(status_code=400, detail="Search query must be at least 2 characters.")
+
+    keyword = f"%{q.lower()}%"
+
+    query = db.query(Article).filter(
+        Article.is_published == True,
+        (
+            Article.title.ilike(keyword) |
+            Article.summary.ilike(keyword) |
+            Article.body.ilike(keyword)
+        )
+    )
+
+    # FREE users only see BASIC articles
+    if current_user.subscription_tier == SubscriptionTier.FREE:
+        query = query.filter(Article.tier == ArticleTier.BASIC)
+
+    # BASIC users only see BASIC articles
+    elif current_user.subscription_tier == SubscriptionTier.BASIC:
+        query = query.filter(Article.tier == ArticleTier.BASIC)
+
+    # PRO sees everything
+    results = query.order_by(Article.published_at.desc()).all()
+
+    if not results:
+        raise HTTPException(status_code=404, detail=f"No articles found for '{q}'.")
+
+    return results
