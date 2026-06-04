@@ -1,30 +1,74 @@
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Optional
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.core.dependencies import get_current_user, require_active_subscription
+from app.core.dependencies import get_current_user
 from app.models.article import Article, ArticleTier
 from app.models.free_article_read import FreeArticleRead
+from app.models.anonymous_read import AnonymousRead, AnonymousEmail
 from app.models.user import User, SubscriptionTier
 from app.schemas.article import ArticleCreate, ArticleUpdate, ArticleListItem, ArticleDetail
 
 router = APIRouter(prefix="/content", tags=["Content"])
 
-FREE_ARTICLE_LIMIT  = 10
-FREE_RESET_DAYS     = 10
+FREE_ARTICLE_LIMIT   = 10
+FREE_RESET_DAYS      = 10
+ANON_SOFT_WALL       = 5    # articles before email prompt
+ANON_HARD_WALL       = 10   # articles before registration wall
+FINGERPRINT_COOKIE   = "sd_fid"
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-def get_article_or_404(slug: str, db: Session) -> Article:
-    article = db.query(Article).filter_by(slug=slug, is_published=True).first()
-    if not article:
-        raise HTTPException(status_code=404, detail="Article not found.")
-    return article
+# ══════════════════════════════════════════════════════════════════════════════
+# Helpers
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_or_create_fingerprint(request: Request, response: Response) -> str:
+    """Get existing fingerprint cookie or create a new one."""
+    fid = request.cookies.get(FINGERPRINT_COOKIE)
+    if not fid:
+        fid = str(uuid.uuid4())
+        response.set_cookie(
+            key=FINGERPRINT_COOKIE,
+            value=fid,
+            max_age=60 * 60 * 24 * 365,  # 1 year
+            httponly=True,
+            samesite="lax",
+        )
+    return fid
+
+
+def get_anon_read_count(fingerprint_id: str, db: Session) -> int:
+    """Count anonymous reads in last 10 days."""
+    since = datetime.now(timezone.utc) - timedelta(days=FREE_RESET_DAYS)
+    return db.query(AnonymousRead).filter(
+        AnonymousRead.fingerprint_id == fingerprint_id,
+        AnonymousRead.read_at >= since,
+    ).count()
+
+
+def anon_already_read(fingerprint_id: str, article_id: int, db: Session) -> bool:
+    """Check if anonymous user already read this article in current window."""
+    since = datetime.now(timezone.utc) - timedelta(days=FREE_RESET_DAYS)
+    return db.query(AnonymousRead).filter(
+        AnonymousRead.fingerprint_id == fingerprint_id,
+        AnonymousRead.article_id == article_id,
+        AnonymousRead.read_at >= since,
+    ).first() is not None
+
+
+def anon_has_submitted_email(fingerprint_id: str, db: Session) -> bool:
+    """Check if anonymous user already submitted their email."""
+    return db.query(AnonymousEmail).filter_by(
+        fingerprint_id=fingerprint_id
+    ).first() is not None
 
 
 def get_free_reads_count(user_id: int, db: Session) -> int:
-    """Count how many free articles this user has read in the last 10 days."""
+    """Count free reads for registered FREE user in last 10 days."""
     since = datetime.now(timezone.utc) - timedelta(days=FREE_RESET_DAYS)
     return db.query(FreeArticleRead).filter(
         FreeArticleRead.user_id == user_id,
@@ -33,7 +77,7 @@ def get_free_reads_count(user_id: int, db: Session) -> int:
 
 
 def already_read(user_id: int, article_id: int, db: Session) -> bool:
-    """Check if user already read this specific article (don't double count)."""
+    """Check if registered user already read this article in current window."""
     since = datetime.now(timezone.utc) - timedelta(days=FREE_RESET_DAYS)
     return db.query(FreeArticleRead).filter(
         FreeArticleRead.user_id == user_id,
@@ -42,70 +86,207 @@ def already_read(user_id: int, article_id: int, db: Session) -> bool:
     ).first() is not None
 
 
-# ── List articles ─────────────────────────────────────────────────────────────
+def get_article_or_404(slug: str, db: Session) -> Article:
+    article = db.query(Article).filter_by(slug=slug, is_published=True).first()
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found.")
+    return article
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Public — no auth required
+# ══════════════════════════════════════════════════════════════════════════════
+
 @router.get("/articles", response_model=list[ArticleListItem])
 def list_articles(
+    request: Request,
+    response: Response,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ):
     """
-    Everyone can see the article list (title + summary).
-    FREE users see BASIC articles only.
-    Subscribers see articles matching their tier.
+    Everyone sees the article list — titles and summaries only.
+    No auth required. PRO articles hidden from anonymous/free users.
     """
-    if current_user.subscription_tier == SubscriptionTier.PRO:
-        articles = db.query(Article).filter_by(
-            is_published=True
-        ).order_by(Article.published_at.desc()).all()
-    else:
-        # FREE and BASIC both see basic list
-        articles = db.query(Article).filter_by(
-            is_published=True, tier=ArticleTier.BASIC
-        ).order_by(Article.published_at.desc()).all()
+    token = request.headers.get("Authorization")
 
-    return articles
+    if token:
+        # Try to identify the user
+        try:
+            from app.core.dependencies import get_current_user
+            from app.core.security import decode_token
+            raw = token.replace("Bearer ", "")
+            payload = decode_token(raw)
+            user_id = int(payload.get("sub"))
+            user = db.get(User, user_id)
+            if user and user.subscription_tier == SubscriptionTier.PRO:
+                return db.query(Article).filter_by(
+                    is_published=True
+                ).order_by(Article.published_at.desc()).all()
+        except Exception:
+            pass
+
+    # Anonymous or FREE/BASIC — show BASIC articles only
+    return db.query(Article).filter_by(
+        is_published=True, tier=ArticleTier.BASIC
+    ).order_by(Article.published_at.desc()).all()
 
 
-# ── Read one article ──────────────────────────────────────────────────────────
+@router.get("/articles/search", response_model=list[ArticleListItem])
+def search_articles(
+    q: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Search articles by keyword. Works for everyone including anonymous users."""
+    if len(q.strip()) < 2:
+        raise HTTPException(status_code=400, detail="Search query must be at least 2 characters.")
+
+    keyword = f"%{q.lower()}%"
+    show_pro = False
+
+    token = request.headers.get("Authorization")
+    if token:
+        try:
+            from app.core.security import decode_token
+            raw = token.replace("Bearer ", "")
+            payload = decode_token(raw)
+            user_id = int(payload.get("sub"))
+            user = db.get(User, user_id)
+            if user and user.subscription_tier == SubscriptionTier.PRO:
+                show_pro = True
+        except Exception:
+            pass
+
+    query = db.query(Article).filter(
+        Article.is_published == True,
+        (
+            Article.title.ilike(keyword) |
+            Article.summary.ilike(keyword) |
+            Article.body.ilike(keyword)
+        )
+    )
+
+    if not show_pro:
+        query = query.filter(Article.tier == ArticleTier.BASIC)
+
+    results = query.order_by(Article.published_at.desc()).all()
+
+    if not results:
+        raise HTTPException(status_code=404, detail=f"No articles found for '{q}'.")
+
+    return results
+
+
 @router.get("/articles/{slug}", response_model=ArticleDetail)
 def get_article(
     slug: str,
+    request: Request,
+    response: Response,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ):
+    """
+    Read a full article.
+    - Anonymous: 0-5 free, 6-10 after email, 11+ register
+    - FREE registered: up to 10 per 10 days
+    - BASIC: unlimited BASIC articles
+    - PRO: unlimited everything
+    """
     article = get_article_or_404(slug, db)
+    token = request.headers.get("Authorization")
+    user = None
 
-    # PRO articles — subscribers only, no free access
-    if article.tier == ArticleTier.PRO:
-        if current_user.subscription_tier != SubscriptionTier.PRO:
+    # Try to get logged in user
+    if token:
+        try:
+            from app.core.security import decode_token
+            raw = token.replace("Bearer ", "")
+            payload = decode_token(raw)
+            user_id = int(payload.get("sub"))
+            user = db.get(User, user_id)
+        except Exception:
+            pass
+
+    # ── Authenticated user ────────────────────────────────────────────────────
+    if user:
+        # PRO articles blocked for non-PRO
+        if article.tier == ArticleTier.PRO and user.subscription_tier != SubscriptionTier.PRO:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=403,
                 detail="This article requires a PRO subscription.",
             )
 
-    # BASIC articles — subscribers get in freely
-    if current_user.subscription_tier in (SubscriptionTier.BASIC, SubscriptionTier.PRO):
+        # Subscribers — unlimited access
+        if user.subscription_tier in (SubscriptionTier.BASIC, SubscriptionTier.PRO):
+            article.view_count += 1
+            db.commit()
+            db.refresh(article)
+            return article
+
+        # FREE registered user — 10 article limit
+        if not already_read(user.id, article.id, db):
+            reads = get_free_reads_count(user.id, db)
+            if reads >= FREE_ARTICLE_LIMIT:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "action": "subscribe",
+                        "message": f"You have used all {FREE_ARTICLE_LIMIT} free articles. Subscribe to continue.",
+                        "subscribe_url": "/api/v1/payments/stk-push",
+                        "resets_in_days": FREE_RESET_DAYS,
+                    },
+                )
+            db.add(FreeArticleRead(user_id=user.id, article_id=article.id))
+
         article.view_count += 1
         db.commit()
         db.refresh(article)
         return article
 
-    # FREE user hitting a BASIC article — apply 10-article limit
-    if not already_read(current_user.id, article.id, db):
-        reads = get_free_reads_count(current_user.id, db)
+    # ── Anonymous user ────────────────────────────────────────────────────────
+    # PRO articles always blocked for anonymous
+    if article.tier == ArticleTier.PRO:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "action": "register",
+                "message": "Create an account and subscribe to access PRO content.",
+            },
+        )
 
-        if reads >= FREE_ARTICLE_LIMIT:
+    fid = get_or_create_fingerprint(request, response)
+
+    if not anon_already_read(fid, article.id, db):
+        reads = get_anon_read_count(fid, db)
+
+        # Hard wall — must register
+        if reads >= ANON_HARD_WALL:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    f"You have used all {FREE_ARTICLE_LIMIT} free articles. "
-                    f"Your access resets every {FREE_RESET_DAYS} days, or subscribe "
-                    f"for unlimited access at /api/v1/payments/stk-push."
-                ),
+                status_code=403,
+                detail={
+                    "action": "register",
+                    "message": "You've read 10 free articles. Create a free account to keep reading.",
+                    "register_url": "/api/v1/auth/register",
+                    "resets_in_days": FREE_RESET_DAYS,
+                },
             )
 
-        # Record the free read
-        db.add(FreeArticleRead(user_id=current_user.id, article_id=article.id))
+        # Soft wall — submit email to unlock articles 6-10
+        if reads >= ANON_SOFT_WALL and not anon_has_submitted_email(fid, db):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "action": "soft_wall",
+                    "message": "Enter your email to keep reading — it's free.",
+                    "submit_url": "/api/v1/content/email-capture",
+                    "resets_in_days": FREE_RESET_DAYS,
+                },
+            )
+
+        db.add(AnonymousRead(
+            fingerprint_id=fid,
+            ip_address=request.client.host,
+            article_id=article.id,
+        ))
 
     article.view_count += 1
     db.commit()
@@ -113,7 +294,33 @@ def get_article(
     return article
 
 
-# ── Admin: create article ─────────────────────────────────────────────────────
+# ── Email capture (soft wall) ─────────────────────────────────────────────────
+@router.post("/email-capture", status_code=200)
+def capture_email(
+    payload: dict,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    """Anonymous user submits email to unlock articles 6-10."""
+    email = payload.get("email", "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Valid email required.")
+
+    fid = get_or_create_fingerprint(request, response)
+
+    # Don't save duplicates
+    if not anon_has_submitted_email(fid, db):
+        db.add(AnonymousEmail(email=email, fingerprint_id=fid))
+        db.commit()
+
+    return {"message": "Thank you! You can now continue reading."}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Admin endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
 @router.post("/admin/articles", response_model=ArticleDetail, status_code=201)
 def create_article(
     body: ArticleCreate,
@@ -136,7 +343,6 @@ def create_article(
     return article
 
 
-# ── Admin: update article ─────────────────────────────────────────────────────
 @router.patch("/admin/articles/{slug}", response_model=ArticleDetail)
 def update_article(
     slug: str,
@@ -163,7 +369,6 @@ def update_article(
     return article
 
 
-# ── Admin: delete article ─────────────────────────────────────────────────────
 @router.delete("/admin/articles/{slug}", status_code=204)
 def delete_article(
     slug: str,
@@ -179,45 +384,3 @@ def delete_article(
 
     db.delete(article)
     db.commit()
-
-
-# ── Search articles ───────────────────────────────────────────────────────────
-@router.get("/articles/search", response_model=list[ArticleListItem])
-def search_articles(
-    q: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Search articles by keyword in title, summary or body.
-    FREE users see BASIC results only.
-    """
-    if len(q.strip()) < 2:
-        raise HTTPException(status_code=400, detail="Search query must be at least 2 characters.")
-
-    keyword = f"%{q.lower()}%"
-
-    query = db.query(Article).filter(
-        Article.is_published == True,
-        (
-            Article.title.ilike(keyword) |
-            Article.summary.ilike(keyword) |
-            Article.body.ilike(keyword)
-        )
-    )
-
-    # FREE users only see BASIC articles
-    if current_user.subscription_tier == SubscriptionTier.FREE:
-        query = query.filter(Article.tier == ArticleTier.BASIC)
-
-    # BASIC users only see BASIC articles
-    elif current_user.subscription_tier == SubscriptionTier.BASIC:
-        query = query.filter(Article.tier == ArticleTier.BASIC)
-
-    # PRO sees everything
-    results = query.order_by(Article.published_at.desc()).all()
-
-    if not results:
-        raise HTTPException(status_code=404, detail=f"No articles found for '{q}'.")
-
-    return results
