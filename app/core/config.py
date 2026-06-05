@@ -1,7 +1,8 @@
-from pydantic_settings import BaseSettings
-from typing import Optional
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+
     # App
     APP_NAME: str = "SafariDesk"
     APP_ENV: str = "development"
@@ -40,10 +41,6 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_REGION: str = "eu-west-1"
     S3_BUCKET_NAME: str = ""
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
 
 # Single instance used everywhere in the app
 settings = Settings()

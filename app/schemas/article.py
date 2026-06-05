@@ -27,6 +27,8 @@ class ArticleUpdate(BaseModel):
 
 # ── Public: article list item (no body — saves bandwidth) ────────────────────
 class ArticleListItem(BaseModel):
+    model_config = {"from_attributes": True}
+
     id:           int
     title:        str
     slug:         str
@@ -36,15 +38,11 @@ class ArticleListItem(BaseModel):
     view_count:   int
     published_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
-
 
 # ── Public: full article ──────────────────────────────────────────────────────
 class ArticleDetail(ArticleListItem):
+    model_config = {"from_attributes": True}
+
     body:       str
     created_at: datetime
     updated_at: Optional[datetime]
-
-    class Config:
-        from_attributes = True
