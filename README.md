@@ -45,7 +45,7 @@ Current test status:
 
 ```bash
 uv run pytest -q
-# 11 passed
+# 27 passed
 ```
 
 ---
@@ -231,6 +231,7 @@ Intended as an append-only log for significant system actions.
 - [x] Protected routes with dependency injection
 - [x] Password hashing with bcrypt
 - [x] Email service setup
+- [x] Auth tests for registration, login, inactive accounts, and protected profile access
 
 ### Sprint 2 - M-Pesa Payments: Mostly Implemented
 
@@ -256,6 +257,7 @@ Intended as an append-only log for significant system actions.
 - [x] Admin article create/update/delete endpoints
 - [x] Reconciler task for stale pending payments
 - [x] Tests for content gating and subscription expiry
+- [x] Tests for subscription activation and admin article management
 - [ ] Subscription expiry automation that downgrades expired users
 - [ ] Renewal reminder emails
 - [ ] Africa's Talking SMS notifications
@@ -271,7 +273,7 @@ Intended as an append-only log for significant system actions.
 
 - [ ] Redis rate limiting
 - [ ] Full audit logging
-- [ ] Broader pytest coverage across auth, content, subscription, and payment flows
+- [x] Broader pytest coverage across auth, content, subscription, and payment flows
 - [x] Pydantic/SQLAlchemy/password-hashing deprecation cleanup
 
 ### Sprint 6 - Deployment: Planned
