@@ -18,6 +18,37 @@ mpesa  = MpesaService()
 
 TIER_PRICES = {"basic": 1, "pro": 5}   # KES
 
+
+def _extract_callback_metadata(stk_callback: dict) -> dict:
+    items = stk_callback.get("CallbackMetadata", {}).get("Item", [])
+    return {item["Name"]: item.get("Value") for item in items}
+
+
+def _backfill_completed_receipt(txn: Transaction, stk_callback: dict, payload: dict, db: Session) -> None:
+    """
+    If the reconciler completed a payment before the real callback arrived, the
+    transaction may be completed without a receipt. Backfill receipt/callback
+    data without re-activating the subscription or sending duplicate email.
+    """
+    if txn.status != TransactionStatus.COMPLETED:
+        return
+
+    meta = _extract_callback_metadata(stk_callback)
+    receipt_number = meta.get("MpesaReceiptNumber")
+    changed = False
+
+    if receipt_number and not txn.mpesa_receipt_number:
+        txn.mpesa_receipt_number = receipt_number
+        changed = True
+
+    if not txn.raw_callback:
+        txn.raw_callback = payload
+        changed = True
+
+    if changed:
+        db.commit()
+
+
 @router.post("/stk-push", response_model=STKPushResponse)
 async def initiate_payment(
     body: STKPushRequest,
@@ -84,6 +115,8 @@ async def mpesa_callback(request: Request, db: Session = Depends(get_db)):
             return {"ResultCode": 0, "ResultDesc": "Accepted"}  # unknown, ignore
 
         if txn.status != TransactionStatus.PENDING:
+            if result_code == 0:
+                _backfill_completed_receipt(txn, stk_callback, payload, db)
             return {"ResultCode": 0, "ResultDesc": "Accepted"}  # idempotency guard
 
         txn.raw_callback = payload
@@ -92,8 +125,7 @@ async def mpesa_callback(request: Request, db: Session = Depends(get_db)):
 
         if result_code == 0:
             # Extract M-Pesa receipt from metadata
-            items = stk_callback.get("CallbackMetadata", {}).get("Item", [])
-            meta  = {i["Name"]: i.get("Value") for i in items}
+            meta = _extract_callback_metadata(stk_callback)
 
             txn.status = TransactionStatus.COMPLETED
             txn.mpesa_receipt_number = meta.get("MpesaReceiptNumber")
