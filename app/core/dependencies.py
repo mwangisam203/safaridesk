@@ -37,9 +37,12 @@ def get_current_user(
     return user
 
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from app.models.subscription import Subscription, SubscriptionStatus
 from app.models.user import SubscriptionTier
+
+
+GRACE_PERIOD_DAYS = 3
 
 
 def require_active_subscription(
@@ -53,10 +56,12 @@ def require_active_subscription(
             detail="This content requires an active subscription. Visit /api/v1/payments/stk-push to subscribe.",
         )
 
-    # Check subscription hasn't expired
-    sub = db.query(Subscription).filter_by(
-        user_id=current_user.id,
-        status=SubscriptionStatus.ACTIVE,
+    # Check subscription is active or inside the 3-day grace period.
+    sub = db.query(Subscription).filter(
+        Subscription.user_id == current_user.id,
+        Subscription.status.in_(
+            [SubscriptionStatus.ACTIVE, SubscriptionStatus.GRACE_PERIOD]
+        ),
     ).first()
 
     if not sub:
@@ -69,11 +74,25 @@ def require_active_subscription(
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
 
-    if expires_at < datetime.now(timezone.utc):
+    now = datetime.now(timezone.utc)
+
+    grace_ends_at = expires_at + timedelta(days=GRACE_PERIOD_DAYS)
+
+    if sub.status == SubscriptionStatus.ACTIVE and expires_at < now <= grace_ends_at:
+        return current_user
+
+    if sub.status == SubscriptionStatus.ACTIVE and grace_ends_at < now:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your subscription has expired. Please renew to continue.",
+            detail="Your subscription grace period has ended. Please renew to continue.",
         )
+
+    if sub.status == SubscriptionStatus.GRACE_PERIOD:
+        if grace_ends_at < now:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your subscription grace period has ended. Please renew to continue.",
+            )
 
     return current_user
 
