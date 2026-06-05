@@ -10,6 +10,7 @@ celery_app = Celery(
     include=[
         "app.tasks.email_tasks",
         "app.tasks.reconciler_task",
+        "app.tasks.subscription_tasks",
     ],
 )
 
@@ -25,6 +26,10 @@ celery_app.conf.update(
         "reconcile-pending-mpesa-transactions": {
             "task": "app.tasks.reconciler_task.reconcile_pending_transactions",
             "schedule": crontab(minute="*/5"),  # every 5 minutes
+        },
+        "process-subscription-expirations": {
+            "task": "app.tasks.subscription_tasks.process_subscription_expirations",
+            "schedule": crontab(hour=0, minute=0),  # daily at midnight UTC
         },
     },
 )
