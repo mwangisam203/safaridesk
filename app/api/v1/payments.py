@@ -49,6 +49,26 @@ def _backfill_completed_receipt(txn: Transaction, stk_callback: dict, payload: d
         db.commit()
 
 
+@router.get("/plans")
+def list_subscription_plans():
+    return {
+        "plans": [
+            {
+                "tier": "basic",
+                "amount": TIER_PRICES["basic"],
+                "currency": "KES",
+                "duration_days": 30,
+            },
+            {
+                "tier": "pro",
+                "amount": TIER_PRICES["pro"],
+                "currency": "KES",
+                "duration_days": 30,
+            },
+        ]
+    }
+
+
 @router.post("/stk-push", response_model=STKPushResponse)
 async def initiate_payment(
     body: STKPushRequest,
