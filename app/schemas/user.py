@@ -18,3 +18,18 @@ class UserResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+
+from typing import Optional
+from app.models.subscription import SubscriptionStatus, SubscriptionTierInfo
+
+
+class SubscriptionStatusResponse(BaseModel):
+    tier:           SubscriptionTierInfo
+    status:         Optional[SubscriptionStatus] = None
+    started_at:     Optional[datetime] = None
+    expires_at:     Optional[datetime] = None
+    days_remaining: Optional[int] = None
+    is_active:      bool = False
+    message:        str  = ""
+
+    model_config = {"from_attributes": True}
