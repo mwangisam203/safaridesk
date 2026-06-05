@@ -272,7 +272,7 @@ Intended as an append-only log for significant system actions.
 - [ ] Redis rate limiting
 - [ ] Full audit logging
 - [ ] Broader pytest coverage across auth, content, subscription, and payment flows
-- [ ] Pydantic/SQLAlchemy deprecation cleanup
+- [x] Pydantic/SQLAlchemy/password-hashing deprecation cleanup
 
 ### Sprint 6 - Deployment: Planned
 
