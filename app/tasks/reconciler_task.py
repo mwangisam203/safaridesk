@@ -8,6 +8,7 @@ from app.models.transaction import Transaction, TransactionStatus
 from app.services.mpesa_service import MpesaService
 from app.services.subscription_service import SubscriptionService
 from app.tasks.email_tasks import send_payment_confirmation, send_payment_failed
+from app.tasks.sms_tasks import send_payment_confirmation_sms
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ def _reconcile_single(txn, db, mpesa):
             txn.mpesa_receipt_number,
             str(txn.amount),
         )
+        send_payment_confirmation_sms.delay(txn.user_id, str(txn.amount))
         logger.info(f"Reconciler: txn {txn.id} COMPLETED — subscription activated for user {txn.user_id}")
 
     elif result_code == "1032":
