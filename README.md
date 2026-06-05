@@ -22,6 +22,7 @@ No credit card required. Just a Kenyan phone number.
 | Queue | Redis + Celery |
 | Payments | M-Pesa Daraja API |
 | Email | Mailtrap/dev SMTP via Celery tasks |
+| SMS | Africa's Talking via Celery tasks |
 | Package Manager | uv |
 
 ---
@@ -37,6 +38,7 @@ SafariDesk currently has:
 - M-Pesa callback handling with pending transaction lookup and idempotency guard.
 - Subscription activation after successful payment callbacks.
 - Celery email tasks for payment confirmation and failed payments.
+- Celery SMS task for Africa's Talking payment confirmation messages.
 - A reconciler task for old pending M-Pesa transactions.
 - Article listing, search, full article access, anonymous/free read limits, email capture, and admin article CRUD.
 - Payment tests covering STK Push and M-Pesa callback success/failure flows.
@@ -45,7 +47,7 @@ Current test status:
 
 ```bash
 uv run pytest -q
-# 32 passed
+# 37 passed
 ```
 
 ---
@@ -261,8 +263,8 @@ Intended as an append-only log for significant system actions.
 - [x] Tests for content gating and subscription expiry
 - [x] Tests for subscription activation and admin article management
 - [x] Subscription expiry automation with 3-day grace period and FREE downgrade
-- [ ] Renewal reminder emails
-- [ ] Africa's Talking SMS notifications
+- [x] Renewal reminder email/SMS notifications in the final 4 days
+- [x] Africa's Talking SMS payment confirmation notifications
 
 ### Sprint 4 - Refunds and Reporting: Planned
 
