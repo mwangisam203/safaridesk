@@ -45,7 +45,7 @@ Current test status:
 
 ```bash
 uv run pytest -q
-# 4 passed
+# 11 passed
 ```
 
 ---
@@ -242,7 +242,7 @@ Intended as an append-only log for significant system actions.
 - [x] Subscription upgrade on confirmed payment
 - [x] Payment confirmation/failure email tasks via Celery
 - [x] Payment flow tests for STK Push and callback success/failure
-- [ ] Harden reconciler completion behavior around missing receipt numbers
+- [x] Harden reconciler completion behavior around missing receipt numbers
 - [ ] Add live sandbox/manual Daraja verification notes
 
 ### Sprint 3 - Content and Subscription Lifecycle: In Progress
@@ -255,9 +255,9 @@ Intended as an append-only log for significant system actions.
 - [x] FREE registered user read tracking
 - [x] Admin article create/update/delete endpoints
 - [x] Reconciler task for stale pending payments
+- [x] Tests for content gating and subscription expiry
 - [ ] Subscription expiry automation that downgrades expired users
 - [ ] Renewal reminder emails
-- [ ] Tests for content gating and subscription expiry
 - [ ] Africa's Talking SMS notifications
 
 ### Sprint 4 - Refunds and Reporting: Planned
