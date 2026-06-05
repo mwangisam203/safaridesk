@@ -10,6 +10,7 @@ from app.models.free_article_read import FreeArticleRead
 from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTierInfo
 from app.models.user import SubscriptionTier, User
 from app.services.subscription_service import SubscriptionService
+from app.tasks.subscription_tasks import process_expired_subscriptions
 from main import app
 
 
@@ -214,6 +215,30 @@ def test_expired_subscription_status_returns_inactive():
     assert "expired" in body["message"]
 
 
+def test_subscription_status_reports_grace_period_as_active():
+    now = datetime.now(timezone.utc)
+    user = make_user(tier=SubscriptionTier.BASIC)
+    subscription = Subscription(
+        id=3,
+        user_id=user.id,
+        tier=SubscriptionTierInfo.BASIC,
+        status=SubscriptionStatus.GRACE_PERIOD,
+        started_at=now - timedelta(days=35),
+        expires_at=now - timedelta(days=1),
+    )
+    fake_db = FakeDb(users=[user], subscriptions=[subscription])
+
+    app.dependency_overrides[dependencies.get_current_user] = lambda: user
+    response = make_client(fake_db).get("/api/v1/users/me/subscription")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["status"] == "grace_period"
+    assert body["is_active"] is True
+    assert body["days_remaining"] >= 1
+    assert "grace period" in body["message"]
+
+
 def test_subscription_activation_creates_subscription_and_syncs_user_tier():
     user = make_user()
     fake_db = FakeDb(users=[user])
@@ -270,6 +295,48 @@ def test_subscription_activation_renews_expired_subscription_from_now():
     assert updated.tier == SubscriptionTierInfo.PRO
     assert 29 <= (updated.expires_at - now).days <= 30
     assert user.subscription_tier == SubscriptionTier.PRO
+    assert fake_db.commits == 1
+
+
+def test_expiration_task_moves_expired_active_subscription_to_grace_period():
+    now = datetime.now(timezone.utc)
+    user = make_user(tier=SubscriptionTier.BASIC)
+    subscription = Subscription(
+        id=3,
+        user_id=user.id,
+        tier=SubscriptionTierInfo.BASIC,
+        status=SubscriptionStatus.ACTIVE,
+        started_at=now - timedelta(days=31),
+        expires_at=now - timedelta(days=1),
+    )
+    fake_db = FakeDb(users=[user], subscriptions=[subscription])
+
+    result = process_expired_subscriptions(fake_db, now=now)
+
+    assert result == {"moved_to_grace": 1, "downgraded": 0}
+    assert subscription.status == SubscriptionStatus.GRACE_PERIOD
+    assert user.subscription_tier == SubscriptionTier.BASIC
+    assert fake_db.commits == 1
+
+
+def test_expiration_task_downgrades_user_after_grace_period_ends():
+    now = datetime.now(timezone.utc)
+    user = make_user(tier=SubscriptionTier.PRO)
+    subscription = Subscription(
+        id=3,
+        user_id=user.id,
+        tier=SubscriptionTierInfo.PRO,
+        status=SubscriptionStatus.GRACE_PERIOD,
+        started_at=now - timedelta(days=40),
+        expires_at=now - timedelta(days=4),
+    )
+    fake_db = FakeDb(users=[user], subscriptions=[subscription])
+
+    result = process_expired_subscriptions(fake_db, now=now)
+
+    assert result == {"moved_to_grace": 0, "downgraded": 1}
+    assert subscription.status == SubscriptionStatus.EXPIRED
+    assert user.subscription_tier == SubscriptionTier.FREE
     assert fake_db.commits == 1
 
 
