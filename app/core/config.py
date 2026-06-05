@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     # Africa's Talking
     AT_USERNAME: str = "sandbox"
     AT_API_KEY: str = ""
+    AT_SENDER_ID: str = ""
 
     # Mail
     MAIL_USERNAME: str = ""

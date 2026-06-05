@@ -10,6 +10,7 @@ celery_app = Celery(
     include=[
         "app.tasks.email_tasks",
         "app.tasks.reconciler_task",
+        "app.tasks.sms_tasks",
         "app.tasks.subscription_tasks",
     ],
 )
