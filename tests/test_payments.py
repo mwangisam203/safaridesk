@@ -75,6 +75,18 @@ def teardown_function():
     app.dependency_overrides.clear()
 
 
+def test_lists_subscription_plans():
+    response = make_client(FakeDb()).get("/api/v1/payments/plans")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "plans": [
+            {"tier": "basic", "amount": 1, "currency": "KES", "duration_days": 30},
+            {"tier": "pro", "amount": 5, "currency": "KES", "duration_days": 30},
+        ]
+    }
+
+
 def test_stk_push_uses_custom_payment_phone(monkeypatch):
     fake_db = FakeDb()
     captured = {}
@@ -180,6 +192,59 @@ def test_success_callback_completes_transaction_and_activates_subscription(monke
     assert txn.completed_at is not None
     assert activated == [(7, "basic")]
     assert confirmation_task.calls == [(7, "TST123", "1.00")]
+
+
+def test_success_callback_activates_selected_pro_subscription(monkeypatch):
+    txn = Transaction(
+        user_id=7,
+        mpesa_request_id="ws_CO_pro_success",
+        merchant_request_id="merchant_pro_success",
+        amount=Decimal("5.00"),
+        tier=SubscriptionTierInfo.PRO,
+        transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
+        status=TransactionStatus.PENDING,
+        phone_number="+254712345678",
+    )
+    fake_db = FakeDb([txn])
+    activated = []
+    confirmation_task = DummyTask()
+
+    class FakeSubscriptionService:
+        def __init__(self, db):
+            self.db = db
+
+        def activate(self, user_id, tier):
+            activated.append((user_id, tier))
+
+    monkeypatch.setattr(payments, "SubscriptionService", FakeSubscriptionService)
+    monkeypatch.setattr(
+        "app.tasks.email_tasks.send_payment_confirmation",
+        confirmation_task,
+    )
+
+    response = make_client(fake_db).post(
+        "/api/v1/payments/mpesa-callback",
+        json={
+            "Body": {
+                "stkCallback": {
+                    "CheckoutRequestID": "ws_CO_pro_success",
+                    "ResultCode": 0,
+                    "ResultDesc": "The service request is processed successfully.",
+                    "CallbackMetadata": {
+                        "Item": [
+                            {"Name": "MpesaReceiptNumber", "Value": "PRO123"},
+                        ]
+                    },
+                }
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    assert txn.status == TransactionStatus.COMPLETED
+    assert txn.mpesa_receipt_number == "PRO123"
+    assert activated == [(7, "pro")]
+    assert confirmation_task.calls == [(7, "PRO123", "5.00")]
 
 
 def test_late_success_callback_backfills_receipt_without_duplicate_activation(monkeypatch):
