@@ -5,7 +5,6 @@ from datetime import datetime, timezone, timedelta
 from app.core.celery_app import celery_app
 from app.db.base import SessionLocal
 from app.models.transaction import Transaction, TransactionStatus
-from app.models.user import User
 from app.services.mpesa_service import MpesaService
 from app.services.subscription_service import SubscriptionService
 from app.tasks.email_tasks import send_payment_confirmation, send_payment_failed
@@ -69,6 +68,10 @@ def reconcile_pending_transactions(self):
 
 def _reconcile_single(txn, db, mpesa):
     """Reconcile a single pending transaction against Daraja."""
+    if txn.status != TransactionStatus.PENDING:
+        logger.info(f"Reconciler: txn {txn.id} already {txn.status}; skipping.")
+        return
+
     logger.info(f"Reconciler: querying status for txn {txn.id} | {txn.mpesa_request_id}")
 
     try:
@@ -80,6 +83,10 @@ def _reconcile_single(txn, db, mpesa):
     result_code = str(result.get("ResultCode", ""))
     result_desc = result.get("ResultDesc", "Unknown")
 
+    txn.raw_callback = result
+    txn.mpesa_response_code = result_code
+    txn.mpesa_response_description = result_desc
+
     logger.info(f"Reconciler: txn {txn.id} → ResultCode={result_code} | {result_desc}")
 
     if result_code == "0":
@@ -87,6 +94,11 @@ def _reconcile_single(txn, db, mpesa):
         txn.status       = TransactionStatus.COMPLETED
         txn.completed_at = datetime.now(timezone.utc)
         txn.failure_reason = None
+        txn.mpesa_receipt_number = (
+            result.get("MpesaReceiptNumber")
+            or result.get("ReceiptNumber")
+            or txn.mpesa_receipt_number
+        )
         db.commit()
 
         SubscriptionService(db).activate(txn.user_id, txn.tier.value)
@@ -95,7 +107,7 @@ def _reconcile_single(txn, db, mpesa):
         send_payment_confirmation.delay(
             txn.user_id,
             txn.mpesa_receipt_number,
-            txn.amount,
+            str(txn.amount),
         )
         logger.info(f"Reconciler: txn {txn.id} COMPLETED — subscription activated for user {txn.user_id}")
 
@@ -105,7 +117,7 @@ def _reconcile_single(txn, db, mpesa):
         txn.failure_reason = "Request cancelled by user"
         db.commit()
 
-        send_payment_failed.delay(txn.user_id, txn.amount, "Payment was cancelled.")
+        send_payment_failed.delay(txn.user_id, str(txn.amount), "Payment was cancelled.")
         logger.info(f"Reconciler: txn {txn.id} CANCELLED by user.")
 
     elif result_code in ("1037", "1001"):
@@ -118,7 +130,7 @@ def _reconcile_single(txn, db, mpesa):
         txn.failure_reason = reason_map.get(result_code, result_desc)
         db.commit()
 
-        send_payment_failed.delay(txn.user_id, txn.amount, txn.failure_reason)
+        send_payment_failed.delay(txn.user_id, str(txn.amount), txn.failure_reason)
         logger.info(f"Reconciler: txn {txn.id} FAILED — {txn.failure_reason}")
 
     else:
@@ -127,5 +139,5 @@ def _reconcile_single(txn, db, mpesa):
         txn.failure_reason = result_desc
         db.commit()
 
-        send_payment_failed.delay(txn.user_id, txn.amount, result_desc)
+        send_payment_failed.delay(txn.user_id, str(txn.amount), result_desc)
         logger.warning(f"Reconciler: txn {txn.id} unknown ResultCode={result_code} — marked FAILED.")
