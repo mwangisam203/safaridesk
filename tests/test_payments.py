@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.api.v1 import payments
 from app.core import dependencies
 from app.db import session
+from app.tasks import reconciler_task
 from app.models.subscription import SubscriptionTierInfo
 from app.models.transaction import Transaction, TransactionStatus, TransactionType
 from app.models.user import SubscriptionTier, User
@@ -181,6 +182,60 @@ def test_success_callback_completes_transaction_and_activates_subscription(monke
     assert confirmation_task.calls == [(7, "TST123", "1.00")]
 
 
+def test_late_success_callback_backfills_receipt_without_duplicate_activation(monkeypatch):
+    txn = Transaction(
+        user_id=7,
+        mpesa_request_id="ws_CO_reconciled",
+        merchant_request_id="merchant_reconciled",
+        amount=Decimal("1.00"),
+        tier=SubscriptionTierInfo.BASIC,
+        transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
+        status=TransactionStatus.COMPLETED,
+        phone_number="+254712345678",
+    )
+    fake_db = FakeDb([txn])
+    confirmation_task = DummyTask()
+
+    class FailIfCalledSubscriptionService:
+        def __init__(self, db):
+            self.db = db
+
+        def activate(self, user_id, tier):
+            raise AssertionError("completed callback should not reactivate subscription")
+
+    monkeypatch.setattr(payments, "SubscriptionService", FailIfCalledSubscriptionService)
+    monkeypatch.setattr(
+        "app.tasks.email_tasks.send_payment_confirmation",
+        confirmation_task,
+    )
+
+    response = make_client(fake_db).post(
+        "/api/v1/payments/mpesa-callback",
+        json={
+            "Body": {
+                "stkCallback": {
+                    "CheckoutRequestID": "ws_CO_reconciled",
+                    "ResultCode": 0,
+                    "ResultDesc": "The service request is processed successfully.",
+                    "CallbackMetadata": {
+                        "Item": [
+                            {"Name": "MpesaReceiptNumber", "Value": "LATE123"},
+                        ]
+                    },
+                }
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ResultCode": 0, "ResultDesc": "Accepted"}
+    assert txn.status == TransactionStatus.COMPLETED
+    assert txn.mpesa_receipt_number == "LATE123"
+    assert txn.raw_callback is not None
+    assert fake_db.commits == 1
+    assert confirmation_task.calls == []
+
+
 def test_failed_callback_marks_transaction_failed(monkeypatch):
     txn = Transaction(
         user_id=7,
@@ -213,3 +268,72 @@ def test_failed_callback_marks_transaction_failed(monkeypatch):
     assert txn.status == TransactionStatus.FAILED
     assert txn.failure_reason == "Request cancelled by user"
     assert failed_task.calls == [(7, "1.00", "Request cancelled by user")]
+
+
+def test_reconciler_skips_already_processed_transaction():
+    txn = Transaction(
+        id=12,
+        user_id=7,
+        mpesa_request_id="ws_CO_done",
+        merchant_request_id="merchant_done",
+        amount=Decimal("1.00"),
+        tier=SubscriptionTierInfo.BASIC,
+        transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
+        status=TransactionStatus.COMPLETED,
+        phone_number="+254712345678",
+    )
+    fake_db = FakeDb([txn])
+
+    class FailIfCalledMpesa:
+        async def query_stk_status(self, checkout_request_id):
+            raise AssertionError("reconciler should not query non-pending transactions")
+
+    reconciler_task._reconcile_single(txn, fake_db, FailIfCalledMpesa())
+
+    assert fake_db.commits == 0
+    assert txn.status == TransactionStatus.COMPLETED
+
+
+def test_reconciler_completes_pending_transaction_and_persists_status(monkeypatch):
+    txn = Transaction(
+        id=13,
+        user_id=7,
+        mpesa_request_id="ws_CO_pending",
+        merchant_request_id="merchant_pending",
+        amount=Decimal("1.00"),
+        tier=SubscriptionTierInfo.BASIC,
+        transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
+        status=TransactionStatus.PENDING,
+        phone_number="+254712345678",
+    )
+    fake_db = FakeDb([txn])
+    activated = []
+    confirmation_task = DummyTask()
+
+    class FakeMpesa:
+        async def query_stk_status(self, checkout_request_id):
+            return {
+                "ResultCode": "0",
+                "ResultDesc": "The service request is processed successfully.",
+            }
+
+    class FakeSubscriptionService:
+        def __init__(self, db):
+            self.db = db
+
+        def activate(self, user_id, tier):
+            activated.append((user_id, tier))
+
+    monkeypatch.setattr(reconciler_task, "SubscriptionService", FakeSubscriptionService)
+    monkeypatch.setattr(reconciler_task, "send_payment_confirmation", confirmation_task)
+
+    reconciler_task._reconcile_single(txn, fake_db, FakeMpesa())
+
+    assert txn.status == TransactionStatus.COMPLETED
+    assert txn.mpesa_receipt_number is None
+    assert txn.mpesa_response_code == "0"
+    assert txn.mpesa_response_description == "The service request is processed successfully."
+    assert txn.raw_callback["ResultCode"] == "0"
+    assert txn.completed_at is not None
+    assert activated == [(7, "basic")]
+    assert confirmation_task.calls == [(7, None, "1.00")]
