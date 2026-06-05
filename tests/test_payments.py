@@ -153,6 +153,7 @@ def test_success_callback_completes_transaction_and_activates_subscription(monke
     fake_db = FakeDb([txn])
     activated = []
     confirmation_task = DummyTask()
+    sms_task = DummyTask()
 
     class FakeSubscriptionService:
         def __init__(self, db):
@@ -165,6 +166,10 @@ def test_success_callback_completes_transaction_and_activates_subscription(monke
     monkeypatch.setattr(
         "app.tasks.email_tasks.send_payment_confirmation",
         confirmation_task,
+    )
+    monkeypatch.setattr(
+        "app.tasks.sms_tasks.send_payment_confirmation_sms",
+        sms_task,
     )
 
     response = make_client(fake_db).post(
@@ -192,6 +197,7 @@ def test_success_callback_completes_transaction_and_activates_subscription(monke
     assert txn.completed_at is not None
     assert activated == [(7, "basic")]
     assert confirmation_task.calls == [(7, "TST123", "1.00")]
+    assert sms_task.calls == [(7, "1.00")]
 
 
 def test_success_callback_activates_selected_pro_subscription(monkeypatch):
@@ -208,6 +214,7 @@ def test_success_callback_activates_selected_pro_subscription(monkeypatch):
     fake_db = FakeDb([txn])
     activated = []
     confirmation_task = DummyTask()
+    sms_task = DummyTask()
 
     class FakeSubscriptionService:
         def __init__(self, db):
@@ -220,6 +227,10 @@ def test_success_callback_activates_selected_pro_subscription(monkeypatch):
     monkeypatch.setattr(
         "app.tasks.email_tasks.send_payment_confirmation",
         confirmation_task,
+    )
+    monkeypatch.setattr(
+        "app.tasks.sms_tasks.send_payment_confirmation_sms",
+        sms_task,
     )
 
     response = make_client(fake_db).post(
@@ -245,6 +256,7 @@ def test_success_callback_activates_selected_pro_subscription(monkeypatch):
     assert txn.mpesa_receipt_number == "PRO123"
     assert activated == [(7, "pro")]
     assert confirmation_task.calls == [(7, "PRO123", "5.00")]
+    assert sms_task.calls == [(7, "5.00")]
 
 
 def test_late_success_callback_backfills_receipt_without_duplicate_activation(monkeypatch):
@@ -374,6 +386,7 @@ def test_reconciler_completes_pending_transaction_and_persists_status(monkeypatc
     fake_db = FakeDb([txn])
     activated = []
     confirmation_task = DummyTask()
+    sms_task = DummyTask()
 
     class FakeMpesa:
         async def query_stk_status(self, checkout_request_id):
@@ -391,6 +404,7 @@ def test_reconciler_completes_pending_transaction_and_persists_status(monkeypatc
 
     monkeypatch.setattr(reconciler_task, "SubscriptionService", FakeSubscriptionService)
     monkeypatch.setattr(reconciler_task, "send_payment_confirmation", confirmation_task)
+    monkeypatch.setattr(reconciler_task, "send_payment_confirmation_sms", sms_task)
 
     reconciler_task._reconcile_single(txn, fake_db, FakeMpesa())
 
@@ -402,3 +416,4 @@ def test_reconciler_completes_pending_transaction_and_persists_status(monkeypatc
     assert txn.completed_at is not None
     assert activated == [(7, "basic")]
     assert confirmation_task.calls == [(7, None, "1.00")]
+    assert sms_task.calls == [(7, "1.00")]

@@ -6,6 +6,7 @@ from app.api.v1 import content
 from app.core import dependencies
 from app.db import session
 from app.models.article import Article, ArticleTier
+from app.models.audit_log import AuditLog
 from app.models.free_article_read import FreeArticleRead
 from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTierInfo
 from app.models.user import SubscriptionTier, User
@@ -43,11 +44,12 @@ class FakeQuery:
 
 
 class FakeDb:
-    def __init__(self, articles=None, users=None, subscriptions=None, free_reads=None):
+    def __init__(self, articles=None, users=None, subscriptions=None, free_reads=None, audit_logs=None):
         self.articles = articles or []
         self.users = users or []
         self.subscriptions = subscriptions or []
         self.free_reads = free_reads or []
+        self.audit_logs = audit_logs or []
         self.added = []
         self.commits = 0
         self.refreshed = []
@@ -60,6 +62,8 @@ class FakeDb:
             self.free_reads.append(row)
         if isinstance(row, Subscription):
             self.subscriptions.append(row)
+        if isinstance(row, AuditLog):
+            self.audit_logs.append(row)
 
     def commit(self):
         self.commits += 1
@@ -83,6 +87,7 @@ class FakeDb:
             User: self.users,
             Article: self.articles,
             Subscription: self.subscriptions,
+            AuditLog: self.audit_logs,
         }.get(model, [])
         return next((row for row in rows if row.id == row_id), None)
 
@@ -92,6 +97,7 @@ class FakeDb:
             User: self.users,
             Subscription: self.subscriptions,
             FreeArticleRead: self.free_reads,
+            AuditLog: self.audit_logs,
         }.get(model, [])
         return FakeQuery(rows)
 
@@ -313,7 +319,7 @@ def test_expiration_task_moves_expired_active_subscription_to_grace_period():
 
     result = process_expired_subscriptions(fake_db, now=now)
 
-    assert result == {"moved_to_grace": 1, "downgraded": 0}
+    assert result == {"reminders_sent": 0, "moved_to_grace": 1, "downgraded": 0}
     assert subscription.status == SubscriptionStatus.GRACE_PERIOD
     assert user.subscription_tier == SubscriptionTier.BASIC
     assert fake_db.commits == 1
@@ -334,10 +340,87 @@ def test_expiration_task_downgrades_user_after_grace_period_ends():
 
     result = process_expired_subscriptions(fake_db, now=now)
 
-    assert result == {"moved_to_grace": 0, "downgraded": 1}
+    assert result == {"reminders_sent": 0, "moved_to_grace": 0, "downgraded": 1}
     assert subscription.status == SubscriptionStatus.EXPIRED
     assert user.subscription_tier == SubscriptionTier.FREE
     assert fake_db.commits == 1
+
+
+def test_expiration_task_sends_renewal_reminders_in_last_four_days(monkeypatch):
+    now = datetime(2026, 6, 28, 8, tzinfo=timezone.utc)
+    user = make_user(tier=SubscriptionTier.BASIC)
+    subscription = Subscription(
+        id=3,
+        user_id=user.id,
+        tier=SubscriptionTierInfo.BASIC,
+        status=SubscriptionStatus.ACTIVE,
+        started_at=now - timedelta(days=26),
+        expires_at=now + timedelta(days=4),
+    )
+    fake_db = FakeDb(users=[user], subscriptions=[subscription])
+    email_calls = []
+    sms_calls = []
+
+    class FakeEmailTask:
+        def delay(self, *args):
+            email_calls.append(args)
+
+    class FakeSmsTask:
+        def delay(self, *args):
+            sms_calls.append(args)
+
+    monkeypatch.setattr("app.tasks.subscription_tasks.send_subscription_renewal_reminder", FakeEmailTask())
+    monkeypatch.setattr("app.tasks.subscription_tasks.send_subscription_renewal_reminder_sms", FakeSmsTask())
+
+    result = process_expired_subscriptions(fake_db, now=now)
+
+    assert result == {"reminders_sent": 1, "moved_to_grace": 0, "downgraded": 0}
+    assert email_calls == [(user.id, 4)]
+    assert sms_calls == [(user.id, 4)]
+    assert fake_db.audit_logs[0].action == "subscription_renewal_reminder_sent"
+    assert fake_db.audit_logs[0].log_metadata == {"days_remaining": 4}
+    assert fake_db.commits == 1
+
+
+def test_expiration_task_does_not_duplicate_same_day_reminder(monkeypatch):
+    now = datetime(2026, 6, 28, 8, tzinfo=timezone.utc)
+    user = make_user(tier=SubscriptionTier.BASIC)
+    subscription = Subscription(
+        id=3,
+        user_id=user.id,
+        tier=SubscriptionTierInfo.BASIC,
+        status=SubscriptionStatus.ACTIVE,
+        started_at=now - timedelta(days=26),
+        expires_at=now + timedelta(days=4),
+    )
+    reminder_log = AuditLog(
+        user_id=user.id,
+        action="subscription_renewal_reminder_sent",
+        entity_type="subscription",
+        entity_id=str(subscription.id),
+        log_metadata={"days_remaining": 4},
+    )
+    fake_db = FakeDb(users=[user], subscriptions=[subscription], audit_logs=[reminder_log])
+    email_calls = []
+    sms_calls = []
+
+    class FakeEmailTask:
+        def delay(self, *args):
+            email_calls.append(args)
+
+    class FakeSmsTask:
+        def delay(self, *args):
+            sms_calls.append(args)
+
+    monkeypatch.setattr("app.tasks.subscription_tasks.send_subscription_renewal_reminder", FakeEmailTask())
+    monkeypatch.setattr("app.tasks.subscription_tasks.send_subscription_renewal_reminder_sms", FakeSmsTask())
+
+    result = process_expired_subscriptions(fake_db, now=now)
+
+    assert result == {"reminders_sent": 0, "moved_to_grace": 0, "downgraded": 0}
+    assert email_calls == []
+    assert sms_calls == []
+    assert fake_db.commits == 0
 
 
 def test_non_admin_cannot_create_article():
