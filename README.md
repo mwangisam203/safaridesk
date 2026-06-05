@@ -45,7 +45,7 @@ Current test status:
 
 ```bash
 uv run pytest -q
-# 27 passed
+# 32 passed
 ```
 
 ---
@@ -163,6 +163,7 @@ uv run pytest -q
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
+| GET | `/api/v1/payments/plans` | List selectable BASIC/PRO subscription plans | No |
 | POST | `/api/v1/payments/stk-push` | Start M-Pesa STK Push for BASIC/PRO subscription | Yes |
 | POST | `/api/v1/payments/mpesa-callback` | Safaricom M-Pesa callback endpoint | No |
 
@@ -237,6 +238,7 @@ Intended as an append-only log for significant system actions.
 
 - [x] M-Pesa Daraja service integration
 - [x] STK Push endpoint
+- [x] Selectable BASIC/PRO plans before payment
 - [x] Pending transaction persistence
 - [x] M-Pesa callback endpoint
 - [x] Callback idempotency guard for already-processed transactions
@@ -258,7 +260,7 @@ Intended as an append-only log for significant system actions.
 - [x] Reconciler task for stale pending payments
 - [x] Tests for content gating and subscription expiry
 - [x] Tests for subscription activation and admin article management
-- [ ] Subscription expiry automation that downgrades expired users
+- [x] Subscription expiry automation with 3-day grace period and FREE downgrade
 - [ ] Renewal reminder emails
 - [ ] Africa's Talking SMS notifications
 
