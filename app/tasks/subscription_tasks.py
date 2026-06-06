@@ -10,7 +10,6 @@ from app.models.user import SubscriptionTier, User
 from app.tasks.email_tasks import send_subscription_renewal_reminder
 from app.tasks.sms_tasks import send_subscription_renewal_reminder_sms
 
-
 logger = logging.getLogger(__name__)
 
 GRACE_PERIOD_DAYS = 3
@@ -45,11 +44,15 @@ def process_expired_subscriptions(db, now: datetime | None = None) -> dict[str, 
     downgraded = 0
     reminders_sent = 0
 
-    candidates = db.query(Subscription).filter(
-        Subscription.status.in_(
-            [SubscriptionStatus.ACTIVE, SubscriptionStatus.GRACE_PERIOD]
+    candidates = (
+        db.query(Subscription)
+        .filter(
+            Subscription.status.in_(
+                [SubscriptionStatus.ACTIVE, SubscriptionStatus.GRACE_PERIOD]
+            )
         )
-    ).all()
+        .all()
+    )
 
     for sub in candidates:
         expires_at = _make_aware(sub.expires_at)
@@ -58,9 +61,13 @@ def process_expired_subscriptions(db, now: datetime | None = None) -> dict[str, 
 
         if sub.status == SubscriptionStatus.ACTIVE and expires_at >= now:
             days_remaining = ceil((expires_at - now).total_seconds() / 86400)
-            if days_remaining in REMINDER_DAYS and not _reminder_already_sent(db, sub, days_remaining):
+            if days_remaining in REMINDER_DAYS and not _reminder_already_sent(
+                db, sub, days_remaining
+            ):
                 send_subscription_renewal_reminder.delay(sub.user_id, days_remaining)
-                send_subscription_renewal_reminder_sms.delay(sub.user_id, days_remaining)
+                send_subscription_renewal_reminder_sms.delay(
+                    sub.user_id, days_remaining
+                )
                 _record_reminder_sent(db, sub, days_remaining)
                 reminders_sent += 1
             continue
@@ -98,12 +105,17 @@ def process_expired_subscriptions(db, now: datetime | None = None) -> dict[str, 
 
 
 def _reminder_already_sent(db, sub: Subscription, days_remaining: int) -> bool:
-    return db.query(AuditLog).filter_by(
-        action="subscription_renewal_reminder_sent",
-        entity_type="subscription",
-        entity_id=str(sub.id),
-        log_metadata={"days_remaining": days_remaining},
-    ).first() is not None
+    return (
+        db.query(AuditLog)
+        .filter_by(
+            action="subscription_renewal_reminder_sent",
+            entity_type="subscription",
+            entity_id=str(sub.id),
+            log_metadata={"days_remaining": days_remaining},
+        )
+        .first()
+        is not None
+    )
 
 
 def _record_reminder_sent(db, sub: Subscription, days_remaining: int) -> None:
