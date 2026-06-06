@@ -7,7 +7,6 @@ from app.models.subscription import Subscription
 from app.models.user import User
 from app.services.sms_service import send_sms
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -22,7 +21,9 @@ def send_payment_confirmation_sms(user_id: int, amount: str | float | int) -> No
     try:
         user = db.query(User).get(user_id)
         if not user:
-            logger.warning("Payment confirmation SMS skipped: user %s not found", user_id)
+            logger.warning(
+                "Payment confirmation SMS skipped: user %s not found", user_id
+            )
             return
 
         subscription = (
@@ -66,7 +67,10 @@ def send_subscription_renewal_reminder_sms(user_id: int, days_remaining: int) ->
             .first()
         )
         if not subscription:
-            logger.warning("Renewal reminder SMS skipped: subscription for user %s not found", user_id)
+            logger.warning(
+                "Renewal reminder SMS skipped: subscription for user %s not found",
+                user_id,
+            )
             return
 
         send_sms(
