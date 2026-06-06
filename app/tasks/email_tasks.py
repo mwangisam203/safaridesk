@@ -7,7 +7,6 @@ from app.models.subscription import Subscription
 from app.models.user import User
 from app.services.email_service import send_email
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -17,12 +16,16 @@ def _format_money(amount: Decimal | float | int | str, currency: str = "KES") ->
 
 
 @celery_app.task(name="app.tasks.email_tasks.send_payment_confirmation")
-def send_payment_confirmation(user_id: int, receipt_number: str | None, amount: str | float | int) -> None:
+def send_payment_confirmation(
+    user_id: int, receipt_number: str | None, amount: str | float | int
+) -> None:
     db = SessionLocal()
     try:
         user = db.query(User).get(user_id)
         if not user:
-            logger.warning("Payment confirmation email skipped: user %s not found", user_id)
+            logger.warning(
+                "Payment confirmation email skipped: user %s not found", user_id
+            )
             return
 
         subscription = (
@@ -62,7 +65,9 @@ def send_payment_confirmation(user_id: int, receipt_number: str | None, amount: 
 
 
 @celery_app.task(name="app.tasks.email_tasks.send_payment_failed")
-def send_payment_failed(user_id: int, amount: str | float | int, reason: str | None = None) -> None:
+def send_payment_failed(
+    user_id: int, amount: str | float | int, reason: str | None = None
+) -> None:
     db = SessionLocal()
     try:
         user = db.query(User).get(user_id)
@@ -106,7 +111,10 @@ def send_subscription_renewal_reminder(user_id: int, days_remaining: int) -> Non
             .first()
         )
         if not subscription:
-            logger.warning("Renewal reminder email skipped: subscription for user %s not found", user_id)
+            logger.warning(
+                "Renewal reminder email skipped: subscription for user %s not found",
+                user_id,
+            )
             return
 
         send_email(
