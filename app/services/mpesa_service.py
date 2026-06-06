@@ -4,7 +4,8 @@ from datetime import datetime
 from app.core.config import settings
 
 SANDBOX_BASE = "https://sandbox.safaricom.co.ke"
-PROD_BASE    = "https://api.safaricom.co.ke"
+PROD_BASE = "https://api.safaricom.co.ke"
+
 
 class MpesaService:
 
@@ -49,7 +50,7 @@ class MpesaService:
             "PartyB": settings.MPESA_BUSINESS_SHORT_CODE,
             "PhoneNumber": phone_normalized,
             "CallBackURL": settings.MPESA_CALLBACK_URL,
-            "AccountReference": account_ref,   # e.g. "SAFARIDESK-SUB"
+            "AccountReference": account_ref,  # e.g. "SAFARIDESK-SUB"
             "TransactionDesc": description,
         }
 
