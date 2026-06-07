@@ -11,20 +11,26 @@ from app.models.article import Article, ArticleTier
 from app.models.free_article_read import FreeArticleRead
 from app.models.anonymous_read import AnonymousRead, AnonymousEmail
 from app.models.user import User, SubscriptionTier
-from app.schemas.article import ArticleCreate, ArticleUpdate, ArticleListItem, ArticleDetail
+from app.schemas.article import (
+    ArticleCreate,
+    ArticleUpdate,
+    ArticleListItem,
+    ArticleDetail,
+)
 
 router = APIRouter(prefix="/content", tags=["Content"])
 
-FREE_ARTICLE_LIMIT   = 10
-FREE_RESET_DAYS      = 10
-ANON_SOFT_WALL       = 5    # articles before email prompt
-ANON_HARD_WALL       = 10   # articles before registration wall
-FINGERPRINT_COOKIE   = "sd_fid"
+FREE_ARTICLE_LIMIT = 10
+FREE_RESET_DAYS = 10
+ANON_SOFT_WALL = 5  # articles before email prompt
+ANON_HARD_WALL = 10  # articles before registration wall
+FINGERPRINT_COOKIE = "sd_fid"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Helpers
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 def get_or_create_fingerprint(request: Request, response: Response) -> str:
     """Get existing fingerprint cookie or create a new one."""
@@ -44,46 +50,65 @@ def get_or_create_fingerprint(request: Request, response: Response) -> str:
 def get_anon_read_count(fingerprint_id: str, db: Session) -> int:
     """Count anonymous reads in last 10 days."""
     since = datetime.now(timezone.utc) - timedelta(days=FREE_RESET_DAYS)
-    return db.query(AnonymousRead).filter(
-        AnonymousRead.fingerprint_id == fingerprint_id,
-        AnonymousRead.read_at >= since,
-    ).count()
+    return (
+        db.query(AnonymousRead)
+        .filter(
+            AnonymousRead.fingerprint_id == fingerprint_id,
+            AnonymousRead.read_at >= since,
+        )
+        .count()
+    )
 
 
 def anon_already_read(fingerprint_id: str, article_id: int, db: Session) -> bool:
     """Check if anonymous user already read this article in current window."""
     since = datetime.now(timezone.utc) - timedelta(days=FREE_RESET_DAYS)
-    return db.query(AnonymousRead).filter(
-        AnonymousRead.fingerprint_id == fingerprint_id,
-        AnonymousRead.article_id == article_id,
-        AnonymousRead.read_at >= since,
-    ).first() is not None
+    return (
+        db.query(AnonymousRead)
+        .filter(
+            AnonymousRead.fingerprint_id == fingerprint_id,
+            AnonymousRead.article_id == article_id,
+            AnonymousRead.read_at >= since,
+        )
+        .first()
+        is not None
+    )
 
 
 def anon_has_submitted_email(fingerprint_id: str, db: Session) -> bool:
     """Check if anonymous user already submitted their email."""
-    return db.query(AnonymousEmail).filter_by(
-        fingerprint_id=fingerprint_id
-    ).first() is not None
+    return (
+        db.query(AnonymousEmail).filter_by(fingerprint_id=fingerprint_id).first()
+        is not None
+    )
 
 
 def get_free_reads_count(user_id: int, db: Session) -> int:
     """Count free reads for registered FREE user in last 10 days."""
     since = datetime.now(timezone.utc) - timedelta(days=FREE_RESET_DAYS)
-    return db.query(FreeArticleRead).filter(
-        FreeArticleRead.user_id == user_id,
-        FreeArticleRead.read_at >= since,
-    ).count()
+    return (
+        db.query(FreeArticleRead)
+        .filter(
+            FreeArticleRead.user_id == user_id,
+            FreeArticleRead.read_at >= since,
+        )
+        .count()
+    )
 
 
 def already_read(user_id: int, article_id: int, db: Session) -> bool:
     """Check if registered user already read this article in current window."""
     since = datetime.now(timezone.utc) - timedelta(days=FREE_RESET_DAYS)
-    return db.query(FreeArticleRead).filter(
-        FreeArticleRead.user_id == user_id,
-        FreeArticleRead.article_id == article_id,
-        FreeArticleRead.read_at >= since,
-    ).first() is not None
+    return (
+        db.query(FreeArticleRead)
+        .filter(
+            FreeArticleRead.user_id == user_id,
+            FreeArticleRead.article_id == article_id,
+            FreeArticleRead.read_at >= since,
+        )
+        .first()
+        is not None
+    )
 
 
 def get_article_or_404(slug: str, db: Session) -> Article:
@@ -96,6 +121,7 @@ def get_article_or_404(slug: str, db: Session) -> Article:
 # ══════════════════════════════════════════════════════════════════════════════
 # Public — no auth required
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @router.get("/articles", response_model=list[ArticleListItem])
 def list_articles(
@@ -114,21 +140,28 @@ def list_articles(
         try:
             from app.core.dependencies import get_current_user
             from app.core.security import decode_token
+
             raw = token.replace("Bearer ", "")
             payload = decode_token(raw)
             user_id = int(payload.get("sub"))
             user = db.get(User, user_id)
             if user and user.subscription_tier == SubscriptionTier.PRO:
-                return db.query(Article).filter_by(
-                    is_published=True
-                ).order_by(Article.published_at.desc()).all()
+                return (
+                    db.query(Article)
+                    .filter_by(is_published=True)
+                    .order_by(Article.published_at.desc())
+                    .all()
+                )
         except Exception:
             pass
 
     # Anonymous or FREE/BASIC — show BASIC articles only
-    return db.query(Article).filter_by(
-        is_published=True, tier=ArticleTier.BASIC
-    ).order_by(Article.published_at.desc()).all()
+    return (
+        db.query(Article)
+        .filter_by(is_published=True, tier=ArticleTier.BASIC)
+        .order_by(Article.published_at.desc())
+        .all()
+    )
 
 
 @router.get("/articles/search", response_model=list[ArticleListItem])
@@ -139,7 +172,9 @@ def search_articles(
 ):
     """Search articles by keyword. Works for everyone including anonymous users."""
     if len(q.strip()) < 2:
-        raise HTTPException(status_code=400, detail="Search query must be at least 2 characters.")
+        raise HTTPException(
+            status_code=400, detail="Search query must be at least 2 characters."
+        )
 
     keyword = f"%{q.lower()}%"
     show_pro = False
@@ -148,6 +183,7 @@ def search_articles(
     if token:
         try:
             from app.core.security import decode_token
+
             raw = token.replace("Bearer ", "")
             payload = decode_token(raw)
             user_id = int(payload.get("sub"))
@@ -160,10 +196,10 @@ def search_articles(
     query = db.query(Article).filter(
         Article.is_published == True,
         (
-            Article.title.ilike(keyword) |
-            Article.summary.ilike(keyword) |
-            Article.body.ilike(keyword)
-        )
+            Article.title.ilike(keyword)
+            | Article.summary.ilike(keyword)
+            | Article.body.ilike(keyword)
+        ),
     )
 
     if not show_pro:
@@ -199,6 +235,7 @@ def get_article(
     if token:
         try:
             from app.core.security import decode_token
+
             raw = token.replace("Bearer ", "")
             payload = decode_token(raw)
             user_id = int(payload.get("sub"))
@@ -209,7 +246,10 @@ def get_article(
     # ── Authenticated user ────────────────────────────────────────────────────
     if user:
         # PRO articles blocked for non-PRO
-        if article.tier == ArticleTier.PRO and user.subscription_tier != SubscriptionTier.PRO:
+        if (
+            article.tier == ArticleTier.PRO
+            and user.subscription_tier != SubscriptionTier.PRO
+        ):
             raise HTTPException(
                 status_code=403,
                 detail="This article requires a PRO subscription.",
@@ -282,11 +322,13 @@ def get_article(
                 },
             )
 
-        db.add(AnonymousRead(
-            fingerprint_id=fid,
-            ip_address=request.client.host,
-            article_id=article.id,
-        ))
+        db.add(
+            AnonymousRead(
+                fingerprint_id=fid,
+                ip_address=request.client.host,
+                article_id=article.id,
+            )
+        )
 
     article.view_count += 1
     db.commit()
@@ -320,6 +362,7 @@ def capture_email(
 # ══════════════════════════════════════════════════════════════════════════════
 # Admin endpoints
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @router.post("/admin/articles", response_model=ArticleDetail, status_code=201)
 def create_article(
