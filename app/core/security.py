@@ -32,6 +32,16 @@ def create_refresh_token(data: dict) -> str:
     return _create_token(data=data, expires_at=expires_at)
 
 
+def create_email_verification_token(user_id: int) -> str:
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        hours=settings.EMAIL_VERIFICATION_EXPIRE_HOURS
+    )
+    return _create_token(
+        data={"sub": str(user_id), "purpose": "email_verification"},
+        expires_at=expires_at,
+    )
+
+
 def decode_token(token: str) -> dict:
     return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
 
