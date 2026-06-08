@@ -44,6 +44,32 @@ class FakeDb:
         self.closed = True
 
 
+def test_verification_email_contains_signed_link(monkeypatch):
+    user = User(
+        id=7,
+        email="sam@example.com",
+        phone_number="+254700000001",
+        hashed_password="hashed",
+        full_name="Samson",
+        subscription_tier=SubscriptionTier.FREE,
+        is_verified=False,
+    )
+    fake_db = FakeDb(users=[user])
+    sent = {}
+
+    monkeypatch.setattr(email_tasks, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(email_tasks, "send_email", lambda **kwargs: sent.update(kwargs))
+    monkeypatch.setattr(email_tasks.settings, "APP_BASE_URL", "http://localhost:8000")
+
+    email_tasks.send_verification_email(user.id)
+
+    assert sent["to_email"] == "sam@example.com"
+    assert sent["subject"] == "Verify your SafariDesk email"
+    assert "http://localhost:8000/api/v1/auth/verify-email?token=" in sent["body"]
+    assert "expires in 24 hours" in sent["body"]
+    assert fake_db.closed is True
+
+
 def test_renewal_reminder_email_uses_subscription_expiry(monkeypatch):
     user = User(
         id=7,
