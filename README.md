@@ -31,8 +31,9 @@ No credit card required. Just a Kenyan phone number.
 
 SafariDesk currently has:
 
-- Auth endpoints for registration, login, Swagger OAuth2 token login, profile lookup, and logout.
+- Auth endpoints for registration, email verification/resend, login, profile lookup, and logout.
 - JWT access and refresh token generation.
+- Signed 24-hour email verification links delivered through Celery.
 - PostgreSQL models and Alembic migrations for users, subscriptions, transactions, articles, audit logs, free reads, and anonymous reads.
 - M-Pesa STK Push initiation for BASIC and PRO subscriptions.
 - M-Pesa callback handling with pending transaction lookup and idempotency guard.
@@ -47,7 +48,7 @@ Current test status:
 
 ```bash
 uv run pytest -q
-# 37 passed
+# 45 passed
 ```
 
 ---
@@ -158,6 +159,8 @@ uv run pytest -q
 | POST | `/api/v1/auth/login` | Login and return JWT tokens | No |
 | POST | `/api/v1/auth/token` | Swagger OAuth2 login | No |
 | GET | `/api/v1/auth/me` | Get current user | Yes |
+| GET | `/api/v1/auth/verify-email?token=...` | Verify email using signed link | No |
+| POST | `/api/v1/auth/resend-verification` | Send another verification email | Yes |
 | POST | `/api/v1/auth/logout` | Logout client-side JWT session | Yes |
 | POST | `/api/v1/auth/test-email` | Send test email | No |
 
@@ -166,7 +169,7 @@ uv run pytest -q
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
 | GET | `/api/v1/payments/plans` | List selectable BASIC/PRO subscription plans | No |
-| POST | `/api/v1/payments/stk-push` | Start M-Pesa STK Push for BASIC/PRO subscription | Yes |
+| POST | `/api/v1/payments/stk-push` | Start M-Pesa STK Push for BASIC/PRO subscription | Verified user |
 | POST | `/api/v1/payments/mpesa-callback` | Safaricom M-Pesa callback endpoint | No |
 
 ### Content
@@ -234,6 +237,8 @@ Intended as an append-only log for significant system actions.
 - [x] Protected routes with dependency injection
 - [x] Password hashing with bcrypt
 - [x] Email service setup
+- [x] Signed email verification links with resend support
+- [x] Verification required for payments and admin content management
 - [x] Auth tests for registration, login, inactive accounts, and protected profile access
 
 ### Sprint 2 - M-Pesa Payments: Mostly Implemented
@@ -326,6 +331,8 @@ Required:
 Common local/development values:
 
 - `REDIS_URL`
+- `APP_BASE_URL`
+- `EMAIL_VERIFICATION_EXPIRE_HOURS`
 - `MPESA_CONSUMER_KEY`
 - `MPESA_CONSUMER_SECRET`
 - `MPESA_BUSINESS_SHORT_CODE`
