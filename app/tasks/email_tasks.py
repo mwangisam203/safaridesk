@@ -5,6 +5,8 @@ from app.core.celery_app import celery_app
 from app.db.base import SessionLocal
 from app.models.subscription import Subscription
 from app.models.user import User
+from app.core.config import settings
+from app.core.security import create_email_verification_token
 from app.services.email_service import send_email
 
 logger = logging.getLogger(__name__)
@@ -13,6 +15,38 @@ logger = logging.getLogger(__name__)
 def _format_money(amount: Decimal | float | int | str, currency: str = "KES") -> str:
     value = Decimal(str(amount))
     return f"{currency} {value:,.2f}"
+
+
+@celery_app.task(name="app.tasks.email_tasks.send_verification_email")
+def send_verification_email(user_id: int) -> None:
+    db = SessionLocal()
+    try:
+        user = db.query(User).get(user_id)
+        if not user or user.is_verified:
+            return
+
+        token = create_email_verification_token(user.id)
+        verification_url = (
+            f"{settings.APP_BASE_URL.rstrip('/')}/api/v1/auth/verify-email"
+            f"?token={token}"
+        )
+        send_email(
+            to_email=user.email,
+            subject="Verify your SafariDesk email",
+            body=(
+                f"Hi {user.full_name},\n\n"
+                "Verify your SafariDesk email by opening this link:\n"
+                f"{verification_url}\n\n"
+                f"This link expires in {settings.EMAIL_VERIFICATION_EXPIRE_HOURS} hours.\n\n"
+                "If you did not create this account, you can ignore this email.\n\n"
+                "SafariDesk"
+            ),
+        )
+    except Exception:
+        logger.exception("Verification email failed for user %s", user_id)
+        raise
+    finally:
+        db.close()
 
 
 @celery_app.task(name="app.tasks.email_tasks.send_payment_confirmation")
