@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import require_verified_user
 from app.models.subscription import SubscriptionTierInfo
 from app.models.user import User
 from app.models.transaction import Transaction, TransactionStatus, TransactionType
@@ -72,7 +72,7 @@ def list_subscription_plans():
 @router.post("/stk-push", response_model=STKPushResponse)
 async def initiate_payment(
     body: STKPushRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
     db: Session = Depends(get_db),
 ):
     tier = SubscriptionTierInfo(body.tier.value)
