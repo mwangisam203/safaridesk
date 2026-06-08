@@ -2,9 +2,20 @@ from fastapi import APIRouter, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
+from app.schemas.auth import (
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+    VerificationResponse,
+)
 from app.schemas.user import UserResponse
-from app.services.auth_service import register_user, login_user, login_user_by_email
+from app.services.auth_service import (
+    login_user,
+    login_user_by_email,
+    register_user,
+    resend_user_verification,
+    verify_user_email,
+)
 from app.services.email_service import send_test_email
 from app.core.dependencies import get_current_user
 from app.models.user import User
@@ -40,6 +51,29 @@ async def logout(current_user: User = Depends(get_current_user)):
     # With JWT, logout is handled client-side (delete the token)
     # For proper server-side logout, add token to a Redis blacklist
     return {"message": "Logged out successfully"}
+
+
+@router.get("/verify-email", response_model=VerificationResponse)
+def verify_email(token: str, db: Session = Depends(get_db)):
+    user = verify_user_email(token, db)
+    return VerificationResponse(
+        message="Email verified successfully.",
+        is_verified=user.is_verified,
+    )
+
+
+@router.post("/resend-verification", response_model=VerificationResponse)
+def resend_verification(current_user: User = Depends(get_current_user)):
+    queued = resend_user_verification(current_user)
+    if not queued:
+        return VerificationResponse(
+            message="Email is already verified.",
+            is_verified=True,
+        )
+    return VerificationResponse(
+        message="Verification email sent.",
+        is_verified=False,
+    )
 
 
 @router.post("/test-email")
