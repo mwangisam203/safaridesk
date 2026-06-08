@@ -119,7 +119,7 @@ def make_article(tier=ArticleTier.BASIC, slug="fastapi-payments", is_published=T
     )
 
 
-def make_user(tier=SubscriptionTier.FREE, is_admin=False):
+def make_user(tier=SubscriptionTier.FREE, is_admin=False, is_verified=True):
     return User(
         id=7,
         email="sam@example.com",
@@ -128,7 +128,7 @@ def make_user(tier=SubscriptionTier.FREE, is_admin=False):
         full_name="Samson",
         subscription_tier=tier,
         is_active=True,
-        is_verified=False,
+        is_verified=is_verified,
         is_admin=is_admin,
         created_at=datetime.now(timezone.utc),
     )
@@ -443,6 +443,28 @@ def test_non_admin_cannot_create_article():
     assert response.status_code == 403
     assert fake_db.added == []
     assert fake_db.commits == 0
+
+
+def test_unverified_admin_cannot_create_article():
+    user = make_user(is_admin=True, is_verified=False)
+    fake_db = FakeDb(users=[user])
+    app.dependency_overrides[dependencies.get_current_user] = lambda: user
+
+    response = make_client(fake_db).post(
+        "/api/v1/content/admin/articles",
+        json={
+            "title": "Building Payment APIs",
+            "slug": "building-payment-apis",
+            "summary": "Payment API notes.",
+            "body": "A detailed guide to building payment APIs.",
+            "tier": "basic",
+            "is_published": True,
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Verify your email before continuing."
+    assert fake_db.added == []
 
 
 def test_admin_can_create_published_article():
