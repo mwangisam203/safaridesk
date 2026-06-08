@@ -1,0 +1,97 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #17211b;
+  background: #f7f8f5;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: #f7f8f5;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.prose-article {
+  font-family: "Newsreader", Georgia, serif;
+  color: #27312b;
+  font-size: 1.18rem;
+  line-height: 1.82;
+}
+
+.prose-article p {
+  margin: 0 0 1.45rem;
+}
+
+.prose-article h2,
+.prose-article h3 {
+  color: #17211b;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0;
+  line-height: 1.25;
+  margin: 2.4rem 0 1rem;
+}
+
+.prose-article h2 {
+  font-size: 1.55rem;
+}
+
+.prose-article h3 {
+  font-size: 1.25rem;
+}
+
+.prose-article pre {
+  overflow-x: auto;
+  border: 1px solid #dfe4df;
+  border-radius: 6px;
+  background: #17211b;
+  color: #eef8f1;
+  padding: 1.1rem;
+  font: 0.9rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lift {
+    transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+  }
+
+  .lift:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 18px 36px rgba(23, 33, 27, 0.11);
+  }
+}
