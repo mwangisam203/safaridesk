@@ -1,8 +1,29 @@
-from sqlalchemy.orm import Session
+import logging
+
 from fastapi import HTTPException, status
+from jose import JWTError
+from sqlalchemy.orm import Session
+
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    hash_password,
+    verify_password,
+)
 from app.models.user import User
 from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
-from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token
+from app.tasks.email_tasks import send_verification_email
+
+logger = logging.getLogger(__name__)
+
+
+def _queue_verification_email(user_id: int) -> None:
+    try:
+        send_verification_email.delay(user_id)
+    except Exception:
+        logger.exception("Could not queue verification email for user %s", user_id)
+
 
 def register_user(request: RegisterRequest, db: Session) -> User:
     # Check email not already registered
@@ -31,8 +52,7 @@ def register_user(request: RegisterRequest, db: Session) -> User:
     db.commit()
     db.refresh(user)
 
-    # TODO Sprint 2: Send verification email via Celery task
-    # send_verification_email.delay(user.id)
+    _queue_verification_email(user.id)
 
     return user
 
@@ -66,3 +86,42 @@ def login_user_by_email(email: str, password: str, db: Session) -> TokenResponse
         access_token=access_token,
         refresh_token=refresh_token
     )
+
+
+def verify_user_email(token: str, db: Session) -> User:
+    invalid_token = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Invalid or expired verification link.",
+    )
+
+    try:
+        payload = decode_token(token)
+        if payload.get("purpose") != "email_verification":
+            raise invalid_token
+        user_id = int(payload["sub"])
+    except (JWTError, KeyError, TypeError, ValueError) as exc:
+        raise invalid_token from exc
+
+    user = db.get(User, user_id)
+    if not user:
+        raise invalid_token
+
+    if not user.is_verified:
+        user.is_verified = True
+        db.commit()
+        db.refresh(user)
+
+    return user
+
+
+def resend_user_verification(user: User) -> bool:
+    if user.is_verified:
+        return False
+    try:
+        send_verification_email.delay(user.id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Verification email could not be queued. Try again shortly.",
+        ) from exc
+    return True
