@@ -61,6 +61,7 @@ def make_user():
         hashed_password="hashed",
         full_name="Samson",
         subscription_tier=SubscriptionTier.FREE,
+        is_verified=True,
     )
     return user
 
@@ -85,6 +86,23 @@ def test_lists_subscription_plans():
             {"tier": "pro", "amount": 5, "currency": "KES", "duration_days": 30},
         ]
     }
+
+
+def test_unverified_user_cannot_start_payment():
+    user = make_user()
+    user.is_verified = False
+    fake_db = FakeDb()
+    client = make_client(fake_db)
+    app.dependency_overrides[dependencies.get_current_user] = lambda: user
+
+    response = client.post(
+        "/api/v1/payments/stk-push",
+        json={"tier": "basic"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Verify your email before continuing."
+    assert fake_db.transactions == []
 
 
 def test_stk_push_uses_custom_payment_phone(monkeypatch):
