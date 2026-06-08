@@ -46,3 +46,8 @@ class TokenResponse(BaseModel):
 
 class TokenRefreshRequest(BaseModel):
     refresh_token: str
+
+
+class VerificationResponse(BaseModel):
+    message: str
+    is_verified: bool
