@@ -2,9 +2,13 @@ from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
-from app.core.security import hash_password
+from app.core import dependencies
+from app.core.security import create_email_verification_token, hash_password
+from app.core.config import settings
+from jose import jwt
 from app.db import session
 from app.models.user import SubscriptionTier, User
+from app.services import auth_service
 from main import app
 
 
@@ -70,12 +74,26 @@ class FakeDb:
             return FakeQuery(self.users)
         return FakeQuery([])
 
+    def get(self, model, row_id):
+        if model is User:
+            return next((user for user in self.users if user.id == row_id), None)
+        return None
+
+
+class DummyTask:
+    def __init__(self):
+        self.calls = []
+
+    def delay(self, *args):
+        self.calls.append(args)
+
 
 def make_user(
     email="sam@example.com",
     phone_number="+254700000001",
     password="strongpass123",
     is_active=True,
+    is_verified=False,
 ):
     return User(
         id=7,
@@ -85,7 +103,7 @@ def make_user(
         full_name="Samson",
         subscription_tier=SubscriptionTier.FREE,
         is_active=is_active,
-        is_verified=False,
+        is_verified=is_verified,
         is_admin=False,
         created_at=datetime.now(timezone.utc),
     )
@@ -100,8 +118,10 @@ def teardown_function():
     app.dependency_overrides.clear()
 
 
-def test_register_creates_user_with_normalized_phone_number():
+def test_register_creates_user_and_queues_verification_email(monkeypatch):
     fake_db = FakeDb()
+    verification_task = DummyTask()
+    monkeypatch.setattr(auth_service, "send_verification_email", verification_task)
 
     response = make_client(fake_db).post(
         "/api/v1/auth/register",
@@ -117,7 +137,9 @@ def test_register_creates_user_with_normalized_phone_number():
     assert response.json()["phone_number"] == "+254712345678"
     assert fake_db.users[0].email == "new@example.com"
     assert fake_db.users[0].hashed_password != "strongpass123"
+    assert fake_db.users[0].is_verified is False
     assert fake_db.commits == 1
+    assert verification_task.calls == [(1,)]
 
 
 def test_register_rejects_duplicate_email():
@@ -208,3 +230,94 @@ def test_me_rejects_invalid_token():
     )
 
     assert response.status_code == 401
+
+
+def test_verify_email_marks_user_verified():
+    user = make_user()
+    fake_db = FakeDb(users=[user])
+    token = create_email_verification_token(user.id)
+
+    response = make_client(fake_db).get(
+        "/api/v1/auth/verify-email",
+        params={"token": token},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": "Email verified successfully.",
+        "is_verified": True,
+    }
+    assert user.is_verified is True
+    assert fake_db.commits == 1
+
+
+def test_verify_email_rejects_access_token():
+    user = make_user()
+    fake_db = FakeDb(users=[user])
+    from app.core.security import create_access_token
+
+    token = create_access_token({"sub": str(user.id)})
+    response = make_client(fake_db).get(
+        "/api/v1/auth/verify-email",
+        params={"token": token},
+    )
+
+    assert response.status_code == 400
+    assert user.is_verified is False
+
+
+def test_verify_email_rejects_expired_token():
+    user = make_user()
+    fake_db = FakeDb(users=[user])
+    token = jwt.encode(
+        {
+            "sub": str(user.id),
+            "purpose": "email_verification",
+            "exp": datetime(2020, 1, 1, tzinfo=timezone.utc),
+        },
+        settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM,
+    )
+
+    response = make_client(fake_db).get(
+        "/api/v1/auth/verify-email",
+        params={"token": token},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid or expired verification link."
+    assert user.is_verified is False
+
+
+def test_resend_verification_queues_email(monkeypatch):
+    user = make_user()
+    fake_db = FakeDb(users=[user])
+    verification_task = DummyTask()
+    monkeypatch.setattr(auth_service, "send_verification_email", verification_task)
+    app.dependency_overrides[dependencies.get_current_user] = lambda: user
+
+    response = make_client(fake_db).post("/api/v1/auth/resend-verification")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": "Verification email sent.",
+        "is_verified": False,
+    }
+    assert verification_task.calls == [(user.id,)]
+
+
+def test_resend_verification_is_idempotent_for_verified_user(monkeypatch):
+    user = make_user(is_verified=True)
+    fake_db = FakeDb(users=[user])
+    verification_task = DummyTask()
+    monkeypatch.setattr(auth_service, "send_verification_email", verification_task)
+    app.dependency_overrides[dependencies.get_current_user] = lambda: user
+
+    response = make_client(fake_db).post("/api/v1/auth/resend-verification")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": "Email is already verified.",
+        "is_verified": True,
+    }
+    assert verification_task.calls == []
