@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_verified_user
 from app.models.article import Article, ArticleTier
 from app.models.free_article_read import FreeArticleRead
 from app.models.anonymous_read import AnonymousRead, AnonymousEmail
@@ -368,7 +368,7 @@ def capture_email(
 def create_article(
     body: ArticleCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
 ):
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Admins only.")
@@ -391,7 +391,7 @@ def update_article(
     slug: str,
     body: ArticleUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
 ):
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Admins only.")
@@ -416,7 +416,7 @@ def update_article(
 def delete_article(
     slug: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_verified_user),
 ):
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Admins only.")
