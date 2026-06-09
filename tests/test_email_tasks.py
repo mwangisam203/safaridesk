@@ -59,13 +59,13 @@ def test_verification_email_contains_signed_link(monkeypatch):
 
     monkeypatch.setattr(email_tasks, "SessionLocal", lambda: fake_db)
     monkeypatch.setattr(email_tasks, "send_email", lambda **kwargs: sent.update(kwargs))
-    monkeypatch.setattr(email_tasks.settings, "APP_BASE_URL", "http://localhost:8000")
+    monkeypatch.setattr(email_tasks.settings, "FRONTEND_URL", "http://localhost:3000")
 
     email_tasks.send_verification_email(user.id)
 
     assert sent["to_email"] == "sam@example.com"
     assert sent["subject"] == "Verify your SafariDesk email"
-    assert "http://localhost:8000/api/v1/auth/verify-email?token=" in sent["body"]
+    assert "http://localhost:3000/verify-email?token=" in sent["body"]
     assert "expires in 24 hours" in sent["body"]
     assert fake_db.closed is True
 
