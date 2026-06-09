@@ -89,6 +89,7 @@ safaridesk/
 ### Prerequisites
 
 - Python 3.12+
+- Node.js 20+
 - PostgreSQL
 - Redis, for Celery/background jobs
 - uv
@@ -122,11 +123,22 @@ variables listed in `app/core/config.py`.
 
 ## Running Locally
 
-Start the API:
+Start the API in one terminal:
 
 ```bash
 uv run uvicorn main:app --reload --port 8000
 ```
+
+Start the React frontend in another terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`. Vite proxies API requests to the FastAPI server
+on port `8000`.
 
 Expose the API to other devices on your network:
 
@@ -138,6 +150,12 @@ Run tests:
 
 ```bash
 uv run pytest -q
+```
+
+Sync the versioned article catalog into PostgreSQL:
+
+```bash
+uv run python -m scripts.sync_articles
 ```
 
 ---
@@ -332,6 +350,7 @@ Common local/development values:
 
 - `REDIS_URL`
 - `APP_BASE_URL`
+- `FRONTEND_URL`
 - `EMAIL_VERIFICATION_EXPIRE_HOURS`
 - `MPESA_CONSUMER_KEY`
 - `MPESA_CONSUMER_SECRET`
