@@ -88,6 +88,12 @@ docker-compose.override.yml
 Thumbs.db
 
 # ===========================
+# FRONTEND
+# ===========================
+frontend/node_modules/
+frontend/dist/
+
+# ===========================
 # ALEMBIC
 # ===========================
 # Don't ignore alembic/versions — you WANT migrations committed
