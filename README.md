@@ -48,7 +48,7 @@ Current test status:
 
 ```bash
 uv run pytest -q
-# 45 passed
+# 47 passed
 ```
 
 ---
@@ -71,11 +71,14 @@ safaridesk/
 │   ├── db/
 │   │   ├── base.py          # SQLAlchemy engine/session base
 │   │   └── session.py       # FastAPI DB session dependency
+│   ├── content/             # Versioned starter article catalog
 │   ├── models/              # SQLAlchemy models
 │   ├── schemas/             # Pydantic request/response schemas
 │   ├── services/            # Auth, email, M-Pesa, subscription logic
 │   └── tasks/               # Celery email and reconciler tasks
 ├── alembic/                 # Database migrations
+├── frontend/                # React, Vite, and Tailwind reader application
+├── scripts/                 # Maintenance and content sync commands
 ├── tests/                   # Pytest tests
 ├── main.py                  # FastAPI entry point
 ├── pyproject.toml           # Project metadata and dependencies
