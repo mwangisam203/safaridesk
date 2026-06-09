@@ -26,10 +26,7 @@ def send_verification_email(user_id: int) -> None:
             return
 
         token = create_email_verification_token(user.id)
-        verification_url = (
-            f"{settings.APP_BASE_URL.rstrip('/')}/api/v1/auth/verify-email"
-            f"?token={token}"
-        )
+        verification_url = f"{settings.FRONTEND_URL.rstrip('/')}/verify-email?token={token}"
         send_email(
             to_email=user.email,
             subject="Verify your SafariDesk email",
