@@ -161,6 +161,19 @@ Sync the versioned article catalog into PostgreSQL:
 uv run python -m scripts.sync_articles
 ```
 
+### Content Workflow
+
+PostgreSQL is the runtime source of truth for published articles. The catalog in
+`app/content/article_catalog.py` provides versioned starter content and can be
+synced repeatedly without creating duplicate rows or resetting publication
+dates and view counts.
+
+Use the catalog for content that should be reproducible across local, test, and
+demo environments. Ongoing editorial work should be managed through protected
+admin article endpoints, with draft, preview, publish, and unpublish controls.
+Admin access is granted by the database `is_admin` flag, not by hard-coding an
+email address in application code.
+
 ---
 
 ## API Endpoints
