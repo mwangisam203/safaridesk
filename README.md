@@ -48,7 +48,7 @@ Current test status:
 
 ```bash
 uv run pytest -q
-# 47 passed
+# 52 passed
 ```
 
 ---
@@ -173,6 +173,27 @@ demo environments. Ongoing editorial work should be managed through protected
 admin article endpoints, with draft, preview, publish, and unpublish controls.
 Admin access is granted by the database `is_admin` flag, not by hard-coding an
 email address in application code.
+
+### Admin Publishing
+
+Verified, active users with `is_admin=true` can open the editorial workspace at
+`http://localhost:3000/admin/articles`.
+
+The admin workflow supports:
+
+- Listing published articles and drafts
+- Creating and editing articles in Markdown
+- Live preview before publishing
+- BASIC or PRO access-tier selection
+- Categories, featured status, cover image URLs, and image alt text
+- SEO titles and descriptions
+- Publishing, unpublishing, and deleting articles
+- Audit records for article creation, updates, publishing, unpublishing, and deletion
+
+The frontend hides admin navigation from regular users, but FastAPI performs the
+authoritative active, verified, and admin checks for every management request.
+Cover images can use project paths such as `/covers/example.webp` during local
+development or CDN/S3 URLs in production.
 
 ---
 
