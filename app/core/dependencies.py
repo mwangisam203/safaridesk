@@ -40,10 +40,26 @@ def get_current_user(
 def require_verified_user(
     current_user: User = Depends(get_current_user),
 ) -> User:
+    if current_user.is_active is False:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account is inactive.",
+        )
     if not current_user.is_verified:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Verify your email before continuing.",
+        )
+    return current_user
+
+
+def require_admin(
+    current_user: User = Depends(require_verified_user),
+) -> User:
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admins only.",
         )
     return current_user
 

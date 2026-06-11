@@ -6,8 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.core.dependencies import get_current_user, require_verified_user
+from app.core.dependencies import get_current_user, require_admin
 from app.models.article import Article, ArticleTier
+from app.models.audit_log import AuditLog
 from app.models.free_article_read import FreeArticleRead
 from app.models.anonymous_read import AnonymousRead, AnonymousEmail
 from app.models.user import User, SubscriptionTier
@@ -116,6 +117,27 @@ def get_article_or_404(slug: str, db: Session) -> Article:
     if not article:
         raise HTTPException(status_code=404, detail="Article not found.")
     return article
+
+
+def record_article_audit(
+    db: Session,
+    request: Request,
+    current_user: User,
+    action: str,
+    article: Article,
+    metadata: Optional[dict] = None,
+) -> None:
+    db.add(
+        AuditLog(
+            user_id=current_user.id,
+            action=action,
+            entity_type="article",
+            entity_id=str(article.id) if article.id is not None else article.slug,
+            log_metadata={"slug": article.slug, **(metadata or {})},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -364,15 +386,37 @@ def capture_email(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+@router.get("/admin/articles", response_model=list[ArticleDetail])
+def list_admin_articles(
+    is_published: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    query = db.query(Article)
+    if is_published is not None:
+        query = query.filter(Article.is_published == is_published)
+    return query.order_by(Article.updated_at.desc(), Article.created_at.desc()).all()
+
+
+@router.get("/admin/articles/{slug}", response_model=ArticleDetail)
+def get_admin_article(
+    slug: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    article = db.query(Article).filter_by(slug=slug).first()
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found.")
+    return article
+
+
 @router.post("/admin/articles", response_model=ArticleDetail, status_code=201)
 def create_article(
     body: ArticleCreate,
+    request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(require_admin),
 ):
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admins only.")
-
     if db.query(Article).filter_by(slug=body.slug).first():
         raise HTTPException(status_code=400, detail="Slug already exists.")
 
@@ -381,6 +425,15 @@ def create_article(
         article.published_at = datetime.now(timezone.utc)
 
     db.add(article)
+    db.flush()
+    record_article_audit(
+        db,
+        request,
+        current_user,
+        "article_created",
+        article,
+        {"is_published": body.is_published},
+    )
     db.commit()
     db.refresh(article)
     return article
@@ -390,23 +443,41 @@ def create_article(
 def update_article(
     slug: str,
     body: ArticleUpdate,
+    request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(require_admin),
 ):
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admins only.")
-
     article = db.query(Article).filter_by(slug=slug).first()
     if not article:
         raise HTTPException(status_code=404, detail="Article not found.")
 
     updates = body.model_dump(exclude_unset=True)
+    new_slug = updates.get("slug")
+    if new_slug and new_slug != slug:
+        existing = db.query(Article).filter_by(slug=new_slug).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Slug already exists.")
+
+    was_published = article.is_published
     for field, value in updates.items():
         setattr(article, field, value)
 
     if body.is_published and not article.published_at:
         article.published_at = datetime.now(timezone.utc)
 
+    action = "article_updated"
+    if body.is_published is True and not was_published:
+        action = "article_published"
+    elif body.is_published is False and was_published:
+        action = "article_unpublished"
+    record_article_audit(
+        db,
+        request,
+        current_user,
+        action,
+        article,
+        {"updated_fields": sorted(updates)},
+    )
     db.commit()
     db.refresh(article)
     return article
@@ -415,15 +486,21 @@ def update_article(
 @router.delete("/admin/articles/{slug}", status_code=204)
 def delete_article(
     slug: str,
+    request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_verified_user),
+    current_user: User = Depends(require_admin),
 ):
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admins only.")
-
     article = db.query(Article).filter_by(slug=slug).first()
     if not article:
         raise HTTPException(status_code=404, detail="Article not found.")
 
+    record_article_audit(
+        db,
+        request,
+        current_user,
+        "article_deleted",
+        article,
+        {"title": article.title},
+    )
     db.delete(article)
     db.commit()
