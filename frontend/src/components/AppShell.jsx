@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BookOpen, CircleUserRound, Menu, Search, X } from "lucide-react";
+import { BookOpen, CircleUserRound, FilePenLine, Menu, Search, X } from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { AuthDialog } from "./AuthDialog";
@@ -42,6 +42,7 @@ export function AppShell({ children }) {
             <NavItem to="/">Library</NavItem>
             <NavItem to="/plans">Plans</NavItem>
             {user && <NavItem to="/account">Account</NavItem>}
+            {user?.is_admin && <NavItem to="/admin/articles">Admin</NavItem>}
           </nav>
 
           <form
@@ -121,6 +122,11 @@ export function AppShell({ children }) {
               <MobileLink to="/" onClick={() => setMobileOpen(false)}>Library</MobileLink>
               <MobileLink to="/plans" onClick={() => setMobileOpen(false)}>Plans</MobileLink>
               {user && <MobileLink to="/account" onClick={() => setMobileOpen(false)}>Account</MobileLink>}
+              {user?.is_admin && (
+                <MobileLink to="/admin/articles" onClick={() => setMobileOpen(false)}>
+                  <span className="inline-flex items-center gap-2"><FilePenLine size={17} />Admin</span>
+                </MobileLink>
+              )}
             </nav>
             <div className="mt-4 grid grid-cols-2 gap-2">
               {user ? (
