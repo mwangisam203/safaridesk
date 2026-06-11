@@ -68,6 +68,11 @@ class FakeDb:
     def commit(self):
         self.commits += 1
 
+    def flush(self):
+        for index, row in enumerate(self.added, start=1):
+            if getattr(row, "id", None) is None:
+                row.id = index
+
     def refresh(self, row):
         self.refreshed.append(row)
         if getattr(row, "id", None) is None:
@@ -110,6 +115,12 @@ def make_article(tier=ArticleTier.BASIC, slug="fastapi-payments", is_published=T
         slug=slug,
         summary="A practical payment flow overview.",
         body="This article explains the full subscription payment workflow.",
+        category="Payments",
+        cover_image_url="/covers/backend-architecture.png",
+        cover_image_alt="Backend payment architecture",
+        seo_title="Understanding FastAPI Payments",
+        seo_description="A practical payment flow overview.",
+        is_featured=False,
         tier=tier,
         author="SafariDesk Team",
         is_published=is_published,
@@ -487,6 +498,11 @@ def test_admin_can_create_published_article():
     assert response.status_code == 201
     assert response.json()["slug"] == "building-payment-apis"
     assert fake_db.articles[0].published_at is not None
+    assert fake_db.audit_logs[0].action == "article_created"
+    assert fake_db.audit_logs[0].log_metadata == {
+        "slug": "building-payment-apis",
+        "is_published": True,
+    }
     assert fake_db.commits == 1
 
 
@@ -527,7 +543,72 @@ def test_admin_can_update_article_and_set_published_at():
     assert response.status_code == 200
     assert article.title == "Updated Payment APIs"
     assert article.published_at is not None
+    assert fake_db.audit_logs[0].action == "article_published"
     assert fake_db.commits == 1
+
+
+def test_admin_can_list_and_preview_draft_articles():
+    user = make_user(is_admin=True)
+    article = make_article(is_published=False)
+    fake_db = FakeDb(articles=[article], users=[user])
+    app.dependency_overrides[dependencies.get_current_user] = lambda: user
+    client = make_client(fake_db)
+
+    list_response = client.get("/api/v1/content/admin/articles")
+    detail_response = client.get(
+        "/api/v1/content/admin/articles/fastapi-payments"
+    )
+
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["is_published"] is False
+    assert detail_response.status_code == 200
+    assert detail_response.json()["body"] == article.body
+
+
+def test_admin_can_change_article_slug():
+    user = make_user(is_admin=True)
+    article = make_article()
+    fake_db = FakeDb(articles=[article], users=[user])
+    app.dependency_overrides[dependencies.get_current_user] = lambda: user
+
+    response = make_client(fake_db).patch(
+        "/api/v1/content/admin/articles/fastapi-payments",
+        json={"slug": "reliable-fastapi-payments"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["slug"] == "reliable-fastapi-payments"
+    assert fake_db.audit_logs[0].action == "article_updated"
+    assert fake_db.audit_logs[0].log_metadata["updated_fields"] == ["slug"]
+
+
+def test_admin_cannot_change_article_to_duplicate_slug():
+    user = make_user(is_admin=True)
+    article = make_article()
+    existing = make_article(slug="existing-guide")
+    fake_db = FakeDb(articles=[article, existing], users=[user])
+    app.dependency_overrides[dependencies.get_current_user] = lambda: user
+
+    response = make_client(fake_db).patch(
+        "/api/v1/content/admin/articles/fastapi-payments",
+        json={"slug": "existing-guide"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Slug already exists."
+    assert fake_db.commits == 0
+
+
+def test_inactive_admin_cannot_manage_articles():
+    user = make_user(is_admin=True)
+    user.is_active = False
+    fake_db = FakeDb(users=[user])
+    app.dependency_overrides[dependencies.get_current_user] = lambda: user
+
+    response = make_client(fake_db).get("/api/v1/content/admin/articles")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "This account is inactive."
 
 
 def test_admin_can_delete_article():
@@ -540,4 +621,5 @@ def test_admin_can_delete_article():
 
     assert response.status_code == 204
     assert fake_db.articles == []
+    assert fake_db.audit_logs[0].action == "article_deleted"
     assert fake_db.commits == 1
