@@ -38,7 +38,7 @@ export function matchesTopic(article, topic) {
 }
 
 export function coverFor(article) {
-  return articleCovers[article.slug] || "/covers/backend-architecture.png";
+  return article.cover_image_url || articleCovers[article.slug] || "/covers/backend-architecture.png";
 }
 
 export function readTime(article) {
@@ -53,11 +53,4 @@ export function formatDate(value) {
     month: "short",
     year: "numeric"
   }).format(new Date(value));
-}
-
-export function articleParagraphs(body = "") {
-  return body
-    .split(/\n{2,}/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean);
 }

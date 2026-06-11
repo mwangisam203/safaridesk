@@ -34,7 +34,10 @@ export function LibraryPage() {
   }, [query]);
 
   const filtered = useMemo(
-    () => articles.filter((article) => matchesTopic(article, topic)),
+    () =>
+      articles
+        .filter((article) => matchesTopic(article, topic))
+        .sort((left, right) => Number(right.is_featured) - Number(left.is_featured)),
     [articles, topic]
   );
   const featured = filtered[0];

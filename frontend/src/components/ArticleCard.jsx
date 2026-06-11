@@ -16,7 +16,7 @@ export function ArticleCard({ article, featured = false }) {
       >
         <img
           src={coverFor(article)}
-          alt=""
+          alt={article.cover_image_alt || ""}
           loading={featured ? "eager" : "lazy"}
           width="1280"
           height="800"
