@@ -17,6 +17,12 @@ class Article(Base):
     slug         = Column(String(255), unique=True, index=True, nullable=False)
     summary      = Column(String(500), nullable=True)   # short preview for FREE users
     body         = Column(Text, nullable=False)
+    category     = Column(String(100), nullable=True)
+    cover_image_url = Column(String(500), nullable=True)
+    cover_image_alt = Column(String(255), nullable=True)
+    seo_title    = Column(String(255), nullable=True)
+    seo_description = Column(String(500), nullable=True)
+    is_featured  = Column(Boolean, nullable=False, default=False)
     tier         = Column(Enum(ArticleTier), nullable=False, default=ArticleTier.BASIC)
     author       = Column(String(100), nullable=False, default="SafariDesk Team")
     is_published = Column(Boolean, default=False)       # draft until True
