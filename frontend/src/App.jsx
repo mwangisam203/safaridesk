@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { AdminRoute } from "./components/AdminRoute";
 import { AdminArticleEditorPage } from "./pages/AdminArticleEditorPage";
+import { AdminArticlePreviewPage } from "./pages/AdminArticlePreviewPage";
 import { AdminArticlesPage } from "./pages/AdminArticlesPage";
 import { AccountPage } from "./pages/AccountPage";
 import { ArticlePage } from "./pages/ArticlePage";
@@ -29,6 +30,10 @@ export default function App() {
         <Route
           path="/admin/articles/:slug/edit"
           element={<AdminRoute><AdminArticleEditorPage /></AdminRoute>}
+        />
+        <Route
+          path="/admin/articles/:slug/preview"
+          element={<AdminRoute><AdminArticlePreviewPage /></AdminRoute>}
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
