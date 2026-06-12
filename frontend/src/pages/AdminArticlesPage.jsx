@@ -120,12 +120,14 @@ export function AdminArticlesPage() {
         </div>
       ) : (
         <div className="mt-5 overflow-x-auto border-y border-neutral-200 bg-white">
-          <table className="w-full min-w-[820px] border-collapse text-left">
+          <table className="w-full min-w-[1040px] border-collapse text-left">
             <thead className="bg-paper text-xs uppercase text-neutral-500">
               <tr>
                 <th className="px-4 py-3 font-semibold">Article</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Tier</th>
+                <th className="px-4 py-3 font-semibold">Author</th>
+                <th className="px-4 py-3 text-right font-semibold">Views</th>
                 <th className="px-4 py-3 font-semibold">Updated</th>
                 <th className="px-4 py-3 text-right font-semibold">Actions</th>
               </tr>
@@ -143,16 +145,21 @@ export function AdminArticlesPage() {
                   <td className="px-4 py-4">
                     <TierBadge tier={article.tier} compact />
                   </td>
+                  <td className="px-4 py-4 text-sm text-neutral-600">{article.author}</td>
+                  <td className="px-4 py-4 text-right text-sm tabular-nums text-neutral-600">
+                    {article.view_count}
+                  </td>
                   <td className="px-4 py-4 text-sm text-neutral-500">
                     {formatDate(article.updated_at || article.created_at)}
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex justify-end gap-1">
-                      {article.is_published && (
-                        <IconLink to={`/articles/${article.slug}`} label="View published article">
-                          <Eye size={17} />
-                        </IconLink>
-                      )}
+                      <IconLink
+                        to={`/admin/articles/${article.slug}/preview`}
+                        label="Preview article"
+                      >
+                        <Eye size={17} />
+                      </IconLink>
                       <IconLink to={`/admin/articles/${article.slug}/edit`} label="Edit article">
                         <FilePenLine size={17} />
                       </IconLink>

@@ -563,6 +563,8 @@ def test_admin_can_list_and_preview_draft_articles():
     assert list_response.json()[0]["is_published"] is False
     assert detail_response.status_code == 200
     assert detail_response.json()["body"] == article.body
+    assert article.view_count == 0
+    assert fake_db.commits == 0
 
 
 def test_admin_can_change_article_slug():
