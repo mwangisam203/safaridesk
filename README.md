@@ -48,7 +48,7 @@ Current test status:
 
 ```bash
 uv run pytest -q
-# 52 passed
+# 58 passed
 ```
 
 ---
@@ -195,6 +195,22 @@ The frontend hides admin navigation from regular users, but FastAPI performs the
 authoritative active, verified, and admin checks for every management request.
 Cover images can use project paths such as `/covers/example.webp` during local
 development or CDN/S3 URLs in production.
+
+Active, verified admins can also discover and read every published BASIC and PRO
+article without a paid subscription. Admin reads never consume the registered
+free-article allowance, and the user's stored subscription tier remains
+unchanged.
+
+### Browser Sessions
+
+Access tokens expire after 30 minutes and refresh tokens after 7 days by
+default. The frontend automatically rotates the token pair after an API request
+receives `401 Unauthorized`, retries the original request once, and keeps the
+user signed in across browser refreshes.
+
+The user is logged out when the refresh token is missing, expired, invalid, or
+belongs to an inactive account. Access and refresh tokens carry different token
+types and cannot be used interchangeably.
 
 ---
 
