@@ -182,8 +182,9 @@ Verified, active users with `is_admin=true` can open the editorial workspace at
 The admin workflow supports:
 
 - Listing published articles and drafts
+- Showing author, view count, status, tier, and last update in the article table
 - Creating and editing articles in Markdown
-- Live preview before publishing
+- Live editor preview and protected full-screen draft preview before publishing
 - BASIC or PRO access-tier selection
 - Categories, featured status, cover image URLs, and image alt text
 - SEO titles and descriptions
