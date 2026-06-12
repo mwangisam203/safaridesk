@@ -165,9 +165,18 @@ def list_articles(
 
             raw = token.replace("Bearer ", "")
             payload = decode_token(raw)
+            if payload.get("type") != "access":
+                raise ValueError("Access token required")
             user_id = int(payload.get("sub"))
             user = db.get(User, user_id)
-            if user and user.subscription_tier == SubscriptionTier.PRO:
+            if user and (
+                user.subscription_tier == SubscriptionTier.PRO
+                or (
+                    user.is_admin
+                    and user.is_verified
+                    and user.is_active
+                )
+            ):
                 return (
                     db.query(Article)
                     .filter_by(is_published=True)
@@ -208,9 +217,18 @@ def search_articles(
 
             raw = token.replace("Bearer ", "")
             payload = decode_token(raw)
+            if payload.get("type") != "access":
+                raise ValueError("Access token required")
             user_id = int(payload.get("sub"))
             user = db.get(User, user_id)
-            if user and user.subscription_tier == SubscriptionTier.PRO:
+            if user and (
+                user.subscription_tier == SubscriptionTier.PRO
+                or (
+                    user.is_admin
+                    and user.is_verified
+                    and user.is_active
+                )
+            ):
                 show_pro = True
         except Exception:
             pass
@@ -260,6 +278,8 @@ def get_article(
 
             raw = token.replace("Bearer ", "")
             payload = decode_token(raw)
+            if payload.get("type") != "access":
+                raise ValueError("Access token required")
             user_id = int(payload.get("sub"))
             user = db.get(User, user_id)
         except Exception:
@@ -267,6 +287,14 @@ def get_article(
 
     # ── Authenticated user ────────────────────────────────────────────────────
     if user:
+        # Active, verified admins inspect all published content without changing
+        # their subscription tier or consuming the registered free-read allowance.
+        if user.is_admin and user.is_verified and user.is_active:
+            article.view_count += 1
+            db.commit()
+            db.refresh(article)
+            return article
+
         # PRO articles blocked for non-PRO
         if (
             article.tier == ArticleTier.PRO
