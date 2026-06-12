@@ -22,14 +22,20 @@ def create_access_token(data: dict) -> str:
     expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
     )
-    return _create_token(data=data, expires_at=expires_at)
+    return _create_token(
+        data={**data, "type": "access"},
+        expires_at=expires_at,
+    )
 
 
 def create_refresh_token(data: dict) -> str:
     expires_at = datetime.now(timezone.utc) + timedelta(
         days=settings.REFRESH_TOKEN_EXPIRE_DAYS
     )
-    return _create_token(data=data, expires_at=expires_at)
+    return _create_token(
+        data={**data, "type": "refresh"},
+        expires_at=expires_at,
+    )
 
 
 def create_email_verification_token(user_id: int) -> str:

@@ -5,6 +5,7 @@ from app.db.session import get_db
 from app.schemas.auth import (
     LoginRequest,
     RegisterRequest,
+    TokenRefreshRequest,
     TokenResponse,
     VerificationResponse,
 )
@@ -12,6 +13,7 @@ from app.schemas.user import UserResponse
 from app.services.auth_service import (
     login_user,
     login_user_by_email,
+    refresh_user_tokens,
     register_user,
     resend_user_verification,
     verify_user_email,
@@ -39,6 +41,13 @@ def token(
 ):
     """OAuth2 login for the Swagger Authorize button. Use email as username."""
     return login_user_by_email(form_data.username, form_data.password, db)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+def refresh(request: TokenRefreshRequest, db: Session = Depends(get_db)):
+    """Rotate a valid refresh token into a new access and refresh token pair."""
+    return refresh_user_tokens(request.refresh_token, db)
+
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):

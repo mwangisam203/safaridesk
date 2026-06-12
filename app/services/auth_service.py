@@ -88,6 +88,35 @@ def login_user_by_email(email: str, password: str, db: Session) -> TokenResponse
     )
 
 
+def refresh_user_tokens(refresh_token: str, db: Session) -> TokenResponse:
+    invalid_token = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired refresh token",
+    )
+
+    try:
+        payload = decode_token(refresh_token)
+        if payload.get("type") != "refresh":
+            raise invalid_token
+        user_id = int(payload["sub"])
+    except (JWTError, KeyError, TypeError, ValueError) as exc:
+        raise invalid_token from exc
+
+    user = db.get(User, user_id)
+    if not user:
+        raise invalid_token
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated",
+        )
+
+    return TokenResponse(
+        access_token=create_access_token(data={"sub": str(user.id)}),
+        refresh_token=create_refresh_token(data={"sub": str(user.id)}),
+    )
+
+
 def verify_user_email(token: str, db: Session) -> User:
     invalid_token = HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,

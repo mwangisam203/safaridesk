@@ -23,6 +23,8 @@ def get_current_user(
 
     try:
         payload = decode_token(token)
+        if payload.get("type") != "access":
+            raise credentials_error
         user_id = payload.get("sub")
         if user_id is None:
             raise credentials_error

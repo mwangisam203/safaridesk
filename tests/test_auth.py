@@ -3,7 +3,13 @@ from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 
 from app.core import dependencies
-from app.core.security import create_email_verification_token, hash_password
+from app.core.security import (
+    create_access_token,
+    create_email_verification_token,
+    create_refresh_token,
+    decode_token,
+    hash_password,
+)
 from app.core.config import settings
 from jose import jwt
 from app.db import session
@@ -191,6 +197,66 @@ def test_login_returns_tokens_for_valid_credentials():
     assert body["access_token"]
     assert body["refresh_token"]
     assert body["token_type"] == "bearer"
+    assert decode_token(body["access_token"])["type"] == "access"
+    assert decode_token(body["refresh_token"])["type"] == "refresh"
+
+
+def test_refresh_rotates_token_pair():
+    user = make_user(is_active=True)
+    fake_db = FakeDb(users=[user])
+    refresh_token = create_refresh_token({"sub": str(user.id)})
+
+    response = make_client(fake_db).post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": refresh_token},
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert decode_token(body["access_token"])["type"] == "access"
+    assert decode_token(body["refresh_token"])["type"] == "refresh"
+    assert decode_token(body["access_token"])["sub"] == str(user.id)
+
+
+def test_refresh_rejects_access_token():
+    user = make_user()
+    fake_db = FakeDb(users=[user])
+    access_token = create_access_token({"sub": str(user.id)})
+
+    response = make_client(fake_db).post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": access_token},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid or expired refresh token"
+
+
+def test_refresh_rejects_inactive_user():
+    user = make_user(is_active=False)
+    fake_db = FakeDb(users=[user])
+    refresh_token = create_refresh_token({"sub": str(user.id)})
+
+    response = make_client(fake_db).post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": refresh_token},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Account is deactivated"
+
+
+def test_me_rejects_refresh_token():
+    user = make_user()
+    fake_db = FakeDb(users=[user])
+    refresh_token = create_refresh_token({"sub": str(user.id)})
+
+    response = make_client(fake_db).get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {refresh_token}"},
+    )
+
+    assert response.status_code == 401
 
 
 def test_login_rejects_wrong_password():
