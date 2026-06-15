@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Check,
   Eye,
+  ImageUp,
   LoaderCircle,
   Save,
   Send
@@ -36,6 +37,8 @@ export function AdminArticleEditorPage() {
   const [article, setArticle] = useState(emptyArticle);
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadedImage, setUploadedImage] = useState(null);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const slugEdited = useRef(false);
@@ -60,6 +63,11 @@ export function AdminArticleEditorPage() {
   }
 
   async function saveArticle(publish = article.is_published) {
+    if (article.cover_image_url && !article.cover_image_alt.trim()) {
+      setError("Add meaningful alt text for the cover image before saving.");
+      return;
+    }
+
     setSaving(true);
     setError("");
     try {
@@ -96,6 +104,31 @@ export function AdminArticleEditorPage() {
       setError(requestError.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function uploadCoverImage(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setUploadingImage(true);
+    setUploadedImage(null);
+    setError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const uploaded = await api("/api/v1/content/admin/article-images", {
+        method: "POST",
+        body: formData
+      });
+      setField("cover_image_url", uploaded.url);
+      setUploadedImage(uploaded);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setUploadingImage(false);
     }
   }
 
@@ -225,6 +258,37 @@ export function AdminArticleEditorPage() {
           </EditorSection>
 
           <EditorSection title="Cover and search">
+            <div>
+              <input
+                id="article-cover-upload"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="sr-only"
+                disabled={uploadingImage}
+                onChange={uploadCoverImage}
+              />
+              <label
+                htmlFor="article-cover-upload"
+                className={`inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-neutral-300 bg-white px-4 text-sm font-semibold text-ink ${
+                  uploadingImage ? "pointer-events-none opacity-50" : ""
+                }`}
+              >
+                {uploadingImage ? (
+                  <LoaderCircle size={17} className="animate-spin" />
+                ) : (
+                  <ImageUp size={17} />
+                )}
+                {uploadingImage ? "Optimizing image..." : "Upload cover image"}
+              </label>
+              <p className="mt-2 text-xs leading-5 text-neutral-500">
+                JPEG, PNG, or WebP. Maximum 8 MB. Large images are resized and converted to WebP.
+              </p>
+              {uploadedImage && (
+                <p className="mt-2 text-xs font-medium text-green-700">
+                  Uploaded {uploadedImage.width} x {uploadedImage.height} WebP
+                </p>
+              )}
+            </div>
             <Field label="Cover image URL">
               <input
                 value={article.cover_image_url}
