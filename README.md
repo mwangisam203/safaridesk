@@ -187,6 +187,8 @@ The admin workflow supports:
 - Live editor preview and protected full-screen draft preview before publishing
 - BASIC or PRO access-tier selection
 - Categories, featured status, cover image URLs, and image alt text
+- Admin cover-image uploads with type and size validation
+- Automatic WebP conversion, metadata removal, and large-image resizing
 - SEO titles and descriptions
 - Publishing, unpublishing, and deleting articles
 - Audit records for article creation, updates, publishing, unpublishing, and deletion
@@ -194,7 +196,30 @@ The admin workflow supports:
 The frontend hides admin navigation from regular users, but FastAPI performs the
 authoritative active, verified, and admin checks for every management request.
 Cover images can use project paths such as `/covers/example.webp` during local
-development or CDN/S3 URLs in production.
+development or CDN/S3 URLs in production. The editor accepts JPEG, PNG, and
+WebP uploads up to 8 MB. Development uploads are written to
+`frontend/public/uploads/articles/` and are intentionally excluded from Git.
+
+For production image storage, configure:
+
+```env
+IMAGE_STORAGE_BACKEND=s3
+IMAGE_UPLOAD_MAX_MB=8
+IMAGE_MAX_WIDTH=2000
+IMAGE_MAX_HEIGHT=1250
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION=eu-west-1
+S3_BUCKET_NAME=safaridesk-assets
+S3_PUBLIC_BASE_URL=https://cdn.safaridesk.com
+```
+
+The AWS identity should have narrowly scoped `s3:PutObject` access to the
+bucket's `articles/*` prefix. Serve uploaded objects through a public,
+read-only CloudFront distribution or another configured CDN; AWS credentials
+must never be exposed to the frontend. PostgreSQL stores only the resulting
+URL and meaningful cover-image alt text. Changing image storage does not
+require a database migration.
 
 Active, verified admins can also discover and read every published BASIC and PRO
 article without a paid subscription. Admin reads never consume the registered

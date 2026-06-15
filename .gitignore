@@ -92,6 +92,7 @@ Thumbs.db
 # ===========================
 frontend/node_modules/
 frontend/dist/
+frontend/public/uploads/
 
 # ===========================
 # ALEMBIC
