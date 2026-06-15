@@ -2,10 +2,20 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.core.config import settings
 from app.core.dependencies import get_current_user, require_admin
 from app.models.article import Article, ArticleTier
 from app.models.audit_log import AuditLog
@@ -18,6 +28,7 @@ from app.schemas.article import (
     ArticleListItem,
     ArticleDetail,
 )
+from app.services.image_storage import ImageUploadError, store_article_image
 
 router = APIRouter(prefix="/content", tags=["Content"])
 
@@ -414,6 +425,32 @@ def capture_email(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+@router.post("/admin/article-images", status_code=201)
+async def upload_article_image(
+    image: UploadFile = File(...),
+    current_user: User = Depends(require_admin),
+):
+    max_bytes = settings.IMAGE_UPLOAD_MAX_MB * 1024 * 1024
+    data = await image.read(max_bytes + 1)
+
+    try:
+        stored = store_article_image(data, image.content_type, image.filename)
+    except ImageUploadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    finally:
+        await image.close()
+
+    return {
+        "url": stored.url,
+        "content_type": stored.content_type,
+        "width": stored.width,
+        "height": stored.height,
+        "size_bytes": stored.size_bytes,
+    }
+
+
 @router.get("/admin/articles", response_model=list[ArticleDetail])
 def list_admin_articles(
     is_published: Optional[bool] = None,
@@ -447,6 +484,11 @@ def create_article(
 ):
     if db.query(Article).filter_by(slug=body.slug).first():
         raise HTTPException(status_code=400, detail="Slug already exists.")
+    if body.cover_image_url and not body.cover_image_alt:
+        raise HTTPException(
+            status_code=422,
+            detail="Cover image alt text is required when a cover image is used.",
+        )
 
     article = Article(**body.model_dump())
     if body.is_published:
@@ -480,6 +522,13 @@ def update_article(
         raise HTTPException(status_code=404, detail="Article not found.")
 
     updates = body.model_dump(exclude_unset=True)
+    resulting_cover_url = updates.get("cover_image_url", article.cover_image_url)
+    resulting_cover_alt = updates.get("cover_image_alt", article.cover_image_alt)
+    if resulting_cover_url and not resulting_cover_alt:
+        raise HTTPException(
+            status_code=422,
+            detail="Cover image alt text is required when a cover image is used.",
+        )
     new_slug = updates.get("slug")
     if new_slug and new_slug != slug:
         existing = db.query(Article).filter_by(slug=new_slug).first()

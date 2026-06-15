@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_REGION: str = "eu-west-1"
     S3_BUCKET_NAME: str = ""
+    S3_PUBLIC_BASE_URL: str = ""
+    IMAGE_STORAGE_BACKEND: str = "local"
+    IMAGE_UPLOAD_DIR: str = "frontend/public/uploads"
+    IMAGE_UPLOAD_MAX_MB: int = 8
+    IMAGE_MAX_WIDTH: int = 2000
+    IMAGE_MAX_HEIGHT: int = 1250
 
 # Single instance used everywhere in the app
 settings = Settings()
