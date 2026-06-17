@@ -1,5 +1,11 @@
 const TOKEN_KEY = "safaridesk_access_token";
 const REFRESH_KEY = "safaridesk_refresh_token";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+
+function apiUrl(path) {
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+}
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY);
@@ -26,7 +32,7 @@ async function refreshAccessToken() {
   if (!refreshToken) return false;
 
   if (!refreshPromise) {
-    refreshPromise = fetch("/api/v1/auth/refresh", {
+    refreshPromise = fetch(apiUrl("/api/v1/auth/refresh"), {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -58,7 +64,7 @@ async function request(path, options = {}) {
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(path, { credentials: "include", ...options, headers });
+  const response = await fetch(apiUrl(path), { credentials: "include", ...options, headers });
   const data = response.status === 204 ? null : await response.json().catch(() => null);
 
   return { response, data };
