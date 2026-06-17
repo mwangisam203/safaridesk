@@ -9,6 +9,8 @@ services:
     healthCheckPath: /health
     autoDeployTrigger: commit
     envVars:
+      # Values with `sync: false` are intentionally not stored in Git.
+      # Add them in Render Dashboard -> safaridesk-api -> Environment.
       - key: APP_NAME
         value: SafariDesk
       - key: APP_ENV

@@ -227,6 +227,10 @@ staging backend service. It deploys the FastAPI API from the root `Dockerfile`,
 runs `alembic upgrade head` before the service starts, and uses `/health` as
 the platform health check.
 
+Do not paste passwords, Neon URLs, AWS keys, M-Pesa credentials, SMS keys, or
+mail passwords into `render.yaml`. That file is committed to GitHub. Values
+marked with `sync: false` must be entered in the Render dashboard.
+
 The deployed backend exposes the same API surface as local development:
 
 - `GET /health`
@@ -270,6 +274,24 @@ curl https://safaridesk-api.onrender.com/health
 
 Then test login, public article listing, a protected admin article route, and
 Swagger at `/docs`.
+
+Where those values live:
+
+- `render.yaml` line near `DATABASE_URL`: declares that Render needs the
+  database variable, but does not store the secret.
+- Render dashboard: open the `safaridesk-api` service, then go to
+  **Environment** and paste the real value there.
+- Neon dashboard: open **Connect**, copy the pooled connection string, then use
+  it as Render's `DATABASE_URL`.
+
+For the Neon pooled URL, Render should receive:
+
+```env
+DATABASE_URL=postgresql://USER:PASSWORD@HOST/neondb?sslmode=require&channel_binding=require
+```
+
+For local Docker Compose, keep using `.env.docker`; do not put the Neon URL in
+`.env.docker.example`.
 
 ### Content Workflow
 
