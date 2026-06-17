@@ -220,6 +220,57 @@ Use local terminal commands when you want the fastest edit-refresh loop. Use
 Docker when you want the whole app, worker, scheduler, Redis, and database to
 run together in a deployment-like environment.
 
+### Backend Deployment
+
+The repository includes a Render Blueprint at `render.yaml` for the first
+staging backend service. It deploys the FastAPI API from the root `Dockerfile`,
+runs `alembic upgrade head` before the service starts, and uses `/health` as
+the platform health check.
+
+The deployed backend exposes the same API surface as local development:
+
+- `GET /health`
+- `/api/v1/auth/*`
+- `/api/v1/content/articles`
+- `/api/v1/content/admin/articles`
+- `/api/v1/payments/*`
+- `/api/v1/users/*`
+
+Before syncing the Blueprint, create or choose external services for:
+
+- PostgreSQL, such as Neon or Render Postgres
+- Redis or a Redis-compatible service
+- SMTP credentials
+- Africa's Talking credentials
+- M-Pesa Daraja credentials
+- S3 bucket and public CDN/base URL
+
+Set dashboard-managed Render variables marked with `sync: false`, especially:
+
+```env
+APP_BASE_URL=https://safaridesk-api.onrender.com
+FRONTEND_URL=https://your-frontend-domain.com
+DATABASE_URL=...
+REDIS_URL=...
+MPESA_CALLBACK_URL=https://safaridesk-api.onrender.com/api/v1/payments/mpesa-callback
+MAIL_USERNAME=...
+MAIL_PASSWORD=...
+AT_API_KEY=...
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+S3_BUCKET_NAME=...
+S3_PUBLIC_BASE_URL=...
+```
+
+After deployment, verify:
+
+```bash
+curl https://safaridesk-api.onrender.com/health
+```
+
+Then test login, public article listing, a protected admin article route, and
+Swagger at `/docs`.
+
 ### Content Workflow
 
 PostgreSQL is the runtime source of truth for published articles. The catalog in
