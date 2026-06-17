@@ -12,6 +12,15 @@ engine = create_engine(
 
 @event.listens_for(engine, "connect")
 def set_search_path(dbapi_connection, connection_record):
+    set_public_search_path(dbapi_connection)
+
+
+@event.listens_for(engine, "checkout")
+def reset_search_path(dbapi_connection, connection_record, connection_proxy):
+    set_public_search_path(dbapi_connection)
+
+
+def set_public_search_path(dbapi_connection):
     cursor = dbapi_connection.cursor()
     try:
         cursor.execute("SET search_path TO public")
