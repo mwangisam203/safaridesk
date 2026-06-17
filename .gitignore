@@ -16,6 +16,7 @@ wheels/
 .env.local
 .env.production
 .env.staging
+.env.docker
 .env.*.local
 *.pem          # AWS key pairs — never commit these
 *.key
