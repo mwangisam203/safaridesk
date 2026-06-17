@@ -48,7 +48,7 @@ Current test status:
 
 ```bash
 uv run pytest -q
-# 58 passed
+# 64 passed
 ```
 
 ---
@@ -119,9 +119,6 @@ uv run uvicorn main:app --reload --port 8000
 
 Visit `http://localhost:8000/docs` for interactive API documentation.
 
-If `.env.example` is not present in your local checkout, create `.env` with the
-variables listed in `app/core/config.py`.
-
 ---
 
 ## Running Locally
@@ -143,6 +140,15 @@ npm run dev
 Open `http://localhost:3000`. Vite proxies API requests to the FastAPI server
 on port `8000`.
 
+For deployed frontends where the API is on a separate origin, set:
+
+```env
+VITE_API_BASE_URL=https://api.your-domain.com
+```
+
+Leave `VITE_API_BASE_URL` empty during local development to keep using the Vite
+proxy.
+
 Expose the API to other devices on your network:
 
 ```bash
@@ -160,6 +166,59 @@ Sync the versioned article catalog into PostgreSQL:
 ```bash
 uv run python -m scripts.sync_articles
 ```
+
+### Running With Docker
+
+Docker Compose can run the full local SafariDesk stack:
+
+- FastAPI API on `http://localhost:8000`
+- React frontend on `http://localhost:3000`
+- PostgreSQL exposed on `localhost:5433`
+- Redis exposed on `localhost:6380`
+- Celery worker
+- Celery Beat scheduler
+
+Create the Docker environment file:
+
+```bash
+cp .env.docker.example .env.docker
+```
+
+Start everything:
+
+```bash
+docker compose up --build
+```
+
+Docker runs `alembic upgrade head` through the `migrate` service before the API,
+worker, and Beat start. If you create a new migration while the stack is already
+running, apply it manually with:
+
+```bash
+docker compose exec api alembic upgrade head
+```
+
+Optional: seed the starter article catalog:
+
+```bash
+docker compose exec api python -m scripts.sync_articles
+```
+
+Stop the stack:
+
+```bash
+docker compose down
+```
+
+Remove Docker database and upload volumes when you want a clean reset:
+
+```bash
+docker compose down -v
+```
+
+Use local terminal commands when you want the fastest edit-refresh loop. Use
+Docker when you want the whole app, worker, scheduler, Redis, and database to
+run together in a deployment-like environment.
 
 ### Content Workflow
 
@@ -442,6 +501,16 @@ Common local/development values:
 - `MAIL_FROM`
 - `MAIL_SERVER`
 - `MAIL_PORT`
+- `IMAGE_STORAGE_BACKEND`
+- `IMAGE_UPLOAD_DIR`
+- `IMAGE_UPLOAD_MAX_MB`
+- `IMAGE_MAX_WIDTH`
+- `IMAGE_MAX_HEIGHT`
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_REGION`
+- `S3_BUCKET_NAME`
+- `S3_PUBLIC_BASE_URL`
 
 ---
 
