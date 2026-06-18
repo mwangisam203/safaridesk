@@ -51,7 +51,11 @@ def _queue_verification_email(user_id: int) -> None:
     )
 
 
-def register_user(request: RegisterRequest, db: Session) -> User:
+def register_user(
+    request: RegisterRequest,
+    db: Session,
+    send_verification: bool = True,
+) -> User:
     # Check email not already registered
     if db.query(User).filter(User.email == request.email).first():
         raise HTTPException(
@@ -78,7 +82,8 @@ def register_user(request: RegisterRequest, db: Session) -> User:
     db.commit()
     db.refresh(user)
 
-    _queue_verification_email(user.id)
+    if send_verification:
+        _queue_verification_email(user.id)
 
     return user
 
@@ -176,23 +181,45 @@ def resend_user_verification(user: User) -> bool:
     return True
 
 
-def request_verification_by_email(email: str, db: Session) -> None:
+def get_verification_recipient(email: str, db: Session) -> User | None:
     user = db.query(User).filter(User.email == email).first()
     if not user or user.is_verified or not user.is_active:
+        return None
+    return user
+
+
+def request_verification_by_email(email: str, db: Session) -> None:
+    user = get_verification_recipient(email, db)
+    if not user:
         return
     _queue_verification_email(user.id)
 
 
-def request_password_reset(email: str, db: Session) -> None:
+def get_password_reset_recipient(email: str, db: Session) -> User | None:
     user = db.query(User).filter(User.email == email).first()
     if not user or not user.is_active:
-        return
+        return None
+    return user
+
+
+def send_verification_for_user(user_id: int) -> None:
+    _queue_verification_email(user_id)
+
+
+def send_password_reset_for_user(user_id: int) -> None:
     _deliver_auth_email(
         send_password_reset_email,
         send_password_reset_email_now,
-        user.id,
+        user_id,
         "password reset email",
     )
+
+
+def request_password_reset(email: str, db: Session) -> None:
+    user = get_password_reset_recipient(email, db)
+    if not user:
+        return
+    send_password_reset_for_user(user.id)
 
 
 def reset_user_password(token: str, password: str, db: Session) -> None:

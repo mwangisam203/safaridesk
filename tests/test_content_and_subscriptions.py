@@ -355,6 +355,49 @@ def test_subscription_activation_extends_active_subscription_from_current_expiry
     assert fake_db.commits == 1
 
 
+def test_subscription_quote_prorates_basic_credit_for_pro_upgrade():
+    now = datetime.now(timezone.utc)
+    user = make_user(tier=SubscriptionTier.BASIC)
+    subscription = Subscription(
+        id=3,
+        user_id=user.id,
+        tier=SubscriptionTierInfo.BASIC,
+        status=SubscriptionStatus.ACTIVE,
+        started_at=now - timedelta(days=10),
+        expires_at=now + timedelta(days=20),
+    )
+    fake_db = FakeDb(users=[user], subscriptions=[subscription])
+
+    quote = SubscriptionService(fake_db).quote(user.id, "pro")
+
+    assert quote["mode"] == "upgrade"
+    assert quote["credit_applied"] > 0
+    assert quote["amount"] <= 5
+
+
+def test_subscription_upgrade_starts_fresh_pro_term_without_double_days():
+    now = datetime.now(timezone.utc)
+    user = make_user(tier=SubscriptionTier.BASIC)
+    subscription = Subscription(
+        id=3,
+        user_id=user.id,
+        tier=SubscriptionTierInfo.BASIC,
+        status=SubscriptionStatus.ACTIVE,
+        started_at=now - timedelta(days=10),
+        expires_at=now + timedelta(days=20),
+    )
+    fake_db = FakeDb(users=[user], subscriptions=[subscription])
+
+    updated = SubscriptionService(fake_db).activate(user.id, "pro", amount_paid=5)
+
+    assert updated is subscription
+    assert updated.tier == SubscriptionTierInfo.PRO
+    assert 29 <= (updated.expires_at - now).days <= 30
+    assert (updated.expires_at - now).days < 40
+    assert user.subscription_tier == SubscriptionTier.PRO
+    assert fake_db.commits == 1
+
+
 def test_subscription_activation_renews_expired_subscription_from_now():
     now = datetime.now(timezone.utc)
     user = make_user(tier=SubscriptionTier.BASIC)

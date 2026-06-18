@@ -102,7 +102,7 @@ def _reconcile_single(txn, db, mpesa):
         )
         db.commit()
 
-        SubscriptionService(db).activate(txn.user_id, txn.tier.value)
+        SubscriptionService(db).activate(txn.user_id, txn.tier.value, amount_paid=txn.amount)
 
         # Send confirmation email
         send_payment_confirmation.delay(

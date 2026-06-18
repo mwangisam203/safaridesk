@@ -3,21 +3,19 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.core.dependencies import require_verified_user
+from app.core.dependencies import get_current_user, require_verified_user
+from app.core.security import decode_token
 from app.models.subscription import SubscriptionTierInfo
 from app.models.user import User
 from app.models.transaction import Transaction, TransactionStatus, TransactionType
 from app.services.mpesa_service import MpesaService
-from app.services.subscription_service import SubscriptionService
-from app.schemas.payments import STKPushRequest, STKPushResponse
+from app.services.subscription_service import SubscriptionService, TIER_PRICES
+from app.schemas.payments import PaymentStatusResponse, STKPushRequest, STKPushResponse
 #from app.core.audit import log_action  #
 import logging
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 mpesa  = MpesaService()
-
-TIER_PRICES = {"basic": 1, "pro": 5}   # KES
-
 
 def _extract_callback_metadata(stk_callback: dict) -> dict:
     items = stk_callback.get("CallbackMetadata", {}).get("Item", [])
@@ -50,18 +48,41 @@ def _backfill_completed_receipt(txn: Transaction, stk_callback: dict, payload: d
 
 
 @router.get("/plans")
-def list_subscription_plans():
+def list_subscription_plans(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user = None
+    token = request.headers.get("Authorization")
+    if token:
+        try:
+            payload = decode_token(token.replace("Bearer ", ""))
+            if payload.get("type") == "access":
+                user = db.get(User, int(payload["sub"]))
+        except Exception:
+            user = None
+
+    service = SubscriptionService(db)
+    basic_quote = service.quote(user.id, "basic") if user else None
+    pro_quote = service.quote(user.id, "pro") if user else None
+
     return {
         "plans": [
             {
                 "tier": "basic",
-                "amount": TIER_PRICES["basic"],
+                "amount": basic_quote["amount"] if basic_quote else int(TIER_PRICES["basic"]),
+                "original_amount": int(TIER_PRICES["basic"]),
+                "credit_applied": float(basic_quote["credit_applied"]) if basic_quote else 0,
+                "billing_mode": basic_quote["mode"] if basic_quote else "new",
                 "currency": "KES",
                 "duration_days": 30,
             },
             {
                 "tier": "pro",
-                "amount": TIER_PRICES["pro"],
+                "amount": pro_quote["amount"] if pro_quote else int(TIER_PRICES["pro"]),
+                "original_amount": int(TIER_PRICES["pro"]),
+                "credit_applied": float(pro_quote["credit_applied"]) if pro_quote else 0,
+                "billing_mode": pro_quote["mode"] if pro_quote else "new",
                 "currency": "KES",
                 "duration_days": 30,
             },
@@ -76,7 +97,7 @@ async def initiate_payment(
     db: Session = Depends(get_db),
 ):
     tier = SubscriptionTierInfo(body.tier.value)
-    amount = TIER_PRICES[tier.value]
+    amount = SubscriptionService(db).quote(current_user.id, tier.value)["amount"]
     payment_phone = body.phone_number or current_user.phone_number
 
     try:
@@ -113,6 +134,47 @@ async def initiate_payment(
         checkout_request_id=result["CheckoutRequestID"],
         merchant_request_id=result["MerchantRequestID"],
         message="Check your phone and enter your M-Pesa PIN.",
+    )
+
+
+@router.get("/status/{checkout_request_id}", response_model=PaymentStatusResponse)
+def get_payment_status(
+    checkout_request_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    txn = db.query(Transaction).filter_by(
+        mpesa_request_id=checkout_request_id,
+        user_id=current_user.id,
+    ).first()
+
+    if not txn:
+        raise HTTPException(404, "Payment request not found.")
+
+    tier = txn.tier.value if txn.tier else None
+    if txn.status == TransactionStatus.COMPLETED:
+        return PaymentStatusResponse(
+            checkout_request_id=checkout_request_id,
+            status=txn.status.value,
+            tier=tier,
+            receipt_number=txn.mpesa_receipt_number,
+            message=f"Payment confirmed. Your {tier.upper() if tier else 'paid'} subscription is active.",
+        )
+
+    if txn.status in {TransactionStatus.FAILED, TransactionStatus.CANCELLED}:
+        return PaymentStatusResponse(
+            checkout_request_id=checkout_request_id,
+            status=txn.status.value,
+            tier=tier,
+            failure_reason=txn.failure_reason,
+            message=txn.failure_reason or "Payment was not completed.",
+        )
+
+    return PaymentStatusResponse(
+        checkout_request_id=checkout_request_id,
+        status=txn.status.value,
+        tier=tier,
+        message="Waiting for M-Pesa confirmation.",
     )
 
 
@@ -153,7 +215,7 @@ async def mpesa_callback(request: Request, db: Session = Depends(get_db)):
             db.commit()
 
             # Upgrade subscription
-            SubscriptionService(db).activate(txn.user_id, txn.tier.value)
+            SubscriptionService(db).activate(txn.user_id, txn.tier.value, amount_paid=txn.amount)
 
             # Fire-and-forget email (Celery)
             from app.tasks.email_tasks import send_payment_confirmation

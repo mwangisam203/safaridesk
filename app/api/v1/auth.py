@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.db.session import get_db
@@ -15,12 +15,13 @@ from app.schemas.user import UserResponse
 from app.services.auth_service import (
     login_user,
     login_user_by_email,
-    request_password_reset,
-    request_verification_by_email,
+    get_password_reset_recipient,
+    get_verification_recipient,
     refresh_user_tokens,
     register_user,
-    resend_user_verification,
     reset_user_password,
+    send_password_reset_for_user,
+    send_verification_for_user,
     verify_user_email,
 )
 from app.services.email_service import send_test_email
@@ -30,9 +31,15 @@ from app.models.user import User
 router = APIRouter()
 
 @router.post("/register", response_model=UserResponse, status_code=201)
-def register(request: RegisterRequest, db: Session = Depends(get_db)):
+def register(
+    request: RegisterRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     """Register a new user. Sends verification email."""
-    return register_user(request, db)
+    user = register_user(request, db, send_verification=False)
+    background_tasks.add_task(send_verification_for_user, user.id)
+    return user
 
 @router.post("/login", response_model=TokenResponse)
 def login(request: LoginRequest, db: Session = Depends(get_db)):
@@ -77,13 +84,16 @@ def verify_email(token: str, db: Session = Depends(get_db)):
 
 
 @router.post("/resend-verification", response_model=VerificationResponse)
-def resend_verification(current_user: User = Depends(get_current_user)):
-    queued = resend_user_verification(current_user)
-    if not queued:
+def resend_verification(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.is_verified:
         return VerificationResponse(
             message="Email is already verified.",
             is_verified=True,
         )
+    background_tasks.add_task(send_verification_for_user, current_user.id)
     return VerificationResponse(
         message="Verification email sent.",
         is_verified=False,
@@ -91,8 +101,14 @@ def resend_verification(current_user: User = Depends(get_current_user)):
 
 
 @router.post("/resend-verification-email", response_model=VerificationResponse)
-def resend_verification_email(request: EmailRequest, db: Session = Depends(get_db)):
-    request_verification_by_email(request.email, db)
+def resend_verification_email(
+    request: EmailRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    user = get_verification_recipient(request.email, db)
+    if user:
+        background_tasks.add_task(send_verification_for_user, user.id)
     return VerificationResponse(
         message="If this account exists and is not verified, a verification email has been sent.",
         is_verified=False,
@@ -100,8 +116,14 @@ def resend_verification_email(request: EmailRequest, db: Session = Depends(get_d
 
 
 @router.post("/forgot-password")
-def forgot_password(request: EmailRequest, db: Session = Depends(get_db)):
-    request_password_reset(request.email, db)
+def forgot_password(
+    request: EmailRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    user = get_password_reset_recipient(request.email, db)
+    if user:
+        background_tasks.add_task(send_password_reset_for_user, user.id)
     return {
         "message": "If this account exists, a password reset email has been sent."
     }

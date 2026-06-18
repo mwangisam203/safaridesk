@@ -11,7 +11,7 @@ def send_email(to_email: str, subject: str, body: str) -> None:
     message["Subject"] = subject
     message.set_content(body)
 
-    with smtplib.SMTP(settings.MAIL_SERVER, settings.MAIL_PORT) as server:
+    with smtplib.SMTP(settings.MAIL_SERVER, settings.MAIL_PORT, timeout=10) as server:
         server.starttls()
         server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
         server.send_message(message)
@@ -23,4 +23,3 @@ def send_test_email(to_email: str) -> None:
         subject="SafariDesk email test",
         body="If you can see this in Mailtrap, SafariDesk email is working.",
     )
-

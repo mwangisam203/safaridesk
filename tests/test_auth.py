@@ -13,6 +13,7 @@ from app.core.security import (
 )
 from app.core.config import settings
 from jose import jwt
+from app.api.v1 import auth as auth_api
 from app.db import session
 from app.models.user import SubscriptionTier, User
 from app.services import auth_service
@@ -138,9 +139,12 @@ def teardown_function():
 
 def test_register_creates_user_and_queues_verification_email(monkeypatch):
     fake_db = FakeDb()
-    verification_task = DummyTask()
-    monkeypatch.setattr(auth_service.settings, "AUTH_EMAIL_DELIVERY_MODE", "celery")
-    monkeypatch.setattr(auth_service, "send_verification_email", verification_task)
+    verification_calls = []
+    monkeypatch.setattr(
+        auth_api,
+        "send_verification_for_user",
+        lambda user_id: verification_calls.append(user_id),
+    )
 
     response = make_client(fake_db).post(
         "/api/v1/auth/register",
@@ -158,7 +162,7 @@ def test_register_creates_user_and_queues_verification_email(monkeypatch):
     assert fake_db.users[0].hashed_password != "strongpass123"
     assert fake_db.users[0].is_verified is False
     assert fake_db.commits == 1
-    assert verification_task.calls == [(1,)]
+    assert verification_calls == [1]
 
 
 def test_register_rejects_duplicate_email():
@@ -371,9 +375,12 @@ def test_verify_email_rejects_expired_token():
 def test_resend_verification_queues_email(monkeypatch):
     user = make_user()
     fake_db = FakeDb(users=[user])
-    verification_task = DummyTask()
-    monkeypatch.setattr(auth_service.settings, "AUTH_EMAIL_DELIVERY_MODE", "celery")
-    monkeypatch.setattr(auth_service, "send_verification_email", verification_task)
+    verification_calls = []
+    monkeypatch.setattr(
+        auth_api,
+        "send_verification_for_user",
+        lambda user_id: verification_calls.append(user_id),
+    )
     app.dependency_overrides[dependencies.get_current_user] = lambda: user
 
     response = make_client(fake_db).post("/api/v1/auth/resend-verification")
@@ -383,15 +390,18 @@ def test_resend_verification_queues_email(monkeypatch):
         "message": "Verification email sent.",
         "is_verified": False,
     }
-    assert verification_task.calls == [(user.id,)]
+    assert verification_calls == [user.id]
 
 
 def test_resend_verification_is_idempotent_for_verified_user(monkeypatch):
     user = make_user(is_verified=True)
     fake_db = FakeDb(users=[user])
-    verification_task = DummyTask()
-    monkeypatch.setattr(auth_service.settings, "AUTH_EMAIL_DELIVERY_MODE", "celery")
-    monkeypatch.setattr(auth_service, "send_verification_email", verification_task)
+    verification_calls = []
+    monkeypatch.setattr(
+        auth_api,
+        "send_verification_for_user",
+        lambda user_id: verification_calls.append(user_id),
+    )
     app.dependency_overrides[dependencies.get_current_user] = lambda: user
 
     response = make_client(fake_db).post("/api/v1/auth/resend-verification")
@@ -401,15 +411,18 @@ def test_resend_verification_is_idempotent_for_verified_user(monkeypatch):
         "message": "Email is already verified.",
         "is_verified": True,
     }
-    assert verification_task.calls == []
+    assert verification_calls == []
 
 
 def test_public_resend_verification_queues_email_without_login(monkeypatch):
     user = make_user(email="sam@example.com", is_verified=False)
     fake_db = FakeDb(users=[user])
-    verification_task = DummyTask()
-    monkeypatch.setattr(auth_service.settings, "AUTH_EMAIL_DELIVERY_MODE", "celery")
-    monkeypatch.setattr(auth_service, "send_verification_email", verification_task)
+    verification_calls = []
+    monkeypatch.setattr(
+        auth_api,
+        "send_verification_for_user",
+        lambda user_id: verification_calls.append(user_id),
+    )
 
     response = make_client(fake_db).post(
         "/api/v1/auth/resend-verification-email",
@@ -418,14 +431,17 @@ def test_public_resend_verification_queues_email_without_login(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["message"].startswith("If this account exists")
-    assert verification_task.calls == [(user.id,)]
+    assert verification_calls == [user.id]
 
 
 def test_public_resend_verification_does_not_reveal_missing_email(monkeypatch):
     fake_db = FakeDb()
-    verification_task = DummyTask()
-    monkeypatch.setattr(auth_service.settings, "AUTH_EMAIL_DELIVERY_MODE", "celery")
-    monkeypatch.setattr(auth_service, "send_verification_email", verification_task)
+    verification_calls = []
+    monkeypatch.setattr(
+        auth_api,
+        "send_verification_for_user",
+        lambda user_id: verification_calls.append(user_id),
+    )
 
     response = make_client(fake_db).post(
         "/api/v1/auth/resend-verification-email",
@@ -434,17 +450,16 @@ def test_public_resend_verification_does_not_reveal_missing_email(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["message"].startswith("If this account exists")
-    assert verification_task.calls == []
+    assert verification_calls == []
 
 
 def test_public_resend_verification_can_send_directly(monkeypatch):
     user = make_user(email="sam@example.com", is_verified=False)
     fake_db = FakeDb(users=[user])
     direct_calls = []
-    monkeypatch.setattr(auth_service.settings, "AUTH_EMAIL_DELIVERY_MODE", "direct")
     monkeypatch.setattr(
-        auth_service,
-        "send_verification_email_now",
+        auth_api,
+        "send_verification_for_user",
         lambda user_id: direct_calls.append(user_id),
     )
 
@@ -461,9 +476,12 @@ def test_public_resend_verification_can_send_directly(monkeypatch):
 def test_forgot_password_queues_reset_email_without_revealing_account(monkeypatch):
     user = make_user(email="sam@example.com")
     fake_db = FakeDb(users=[user])
-    reset_task = DummyTask()
-    monkeypatch.setattr(auth_service.settings, "AUTH_EMAIL_DELIVERY_MODE", "celery")
-    monkeypatch.setattr(auth_service, "send_password_reset_email", reset_task)
+    reset_calls = []
+    monkeypatch.setattr(
+        auth_api,
+        "send_password_reset_for_user",
+        lambda user_id: reset_calls.append(user_id),
+    )
 
     response = make_client(fake_db).post(
         "/api/v1/auth/forgot-password",
@@ -472,7 +490,7 @@ def test_forgot_password_queues_reset_email_without_revealing_account(monkeypatc
 
     assert response.status_code == 200
     assert response.json()["message"].startswith("If this account exists")
-    assert reset_task.calls == [(user.id,)]
+    assert reset_calls == [user.id]
 
 
 def test_reset_password_updates_hash():

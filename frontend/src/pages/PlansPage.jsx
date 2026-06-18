@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, LoaderCircle, Phone, ShieldCheck, Smartphone } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -18,12 +18,14 @@ const benefits = {
 };
 
 export function PlansPage() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [plans, setPlans] = useState([]);
   const [selected, setSelected] = useState(null);
   const [phone, setPhone] = useState(user?.phone_number || "");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null);
+  const [paymentStatus, setPaymentStatus] = useState(null);
+  const pollingRef = useRef(null);
 
   useEffect(() => {
     api("/api/v1/payments/plans").then((data) => setPlans(data.plans));
@@ -33,8 +35,13 @@ export function PlansPage() {
     if (user?.phone_number) setPhone(user.phone_number);
   }, [user]);
 
+  useEffect(() => () => {
+    if (pollingRef.current) window.clearInterval(pollingRef.current);
+  }, []);
+
   async function pay(plan) {
     setNotice(null);
+    setPaymentStatus(null);
     if (!user) {
       setNotice({ type: "error", text: "Sign in or create an account before subscribing." });
       return;
@@ -50,12 +57,57 @@ export function PlansPage() {
         method: "POST",
         body: JSON.stringify({ tier: plan.tier, phone_number: phone || null })
       });
-      setNotice({ type: "success", text: result.message });
+      setPaymentStatus({
+        checkout_request_id: result.checkout_request_id,
+        status: "pending",
+        message: result.message
+      });
+      pollPaymentStatus(result.checkout_request_id);
     } catch (error) {
       setNotice({ type: "error", text: error.message });
     } finally {
       setBusy(false);
     }
+  }
+
+  function pollPaymentStatus(checkoutRequestId) {
+    if (pollingRef.current) window.clearInterval(pollingRef.current);
+    let attempts = 0;
+    const maxAttempts = 24;
+
+    pollingRef.current = window.setInterval(async () => {
+      attempts += 1;
+      try {
+        const status = await api(`/api/v1/payments/status/${checkoutRequestId}`);
+        setPaymentStatus(status);
+
+        if (status.status === "completed") {
+          window.clearInterval(pollingRef.current);
+          pollingRef.current = null;
+          setNotice({ type: "success", text: status.message });
+          await refreshUser();
+        }
+
+        if (status.status === "failed" || status.status === "cancelled") {
+          window.clearInterval(pollingRef.current);
+          pollingRef.current = null;
+          setNotice({ type: "error", text: status.message });
+        }
+      } catch (error) {
+        window.clearInterval(pollingRef.current);
+        pollingRef.current = null;
+        setNotice({ type: "error", text: error.message });
+      }
+
+      if (attempts >= maxAttempts) {
+        window.clearInterval(pollingRef.current);
+        pollingRef.current = null;
+        setPaymentStatus((current) => current && {
+          ...current,
+          message: "Still waiting for confirmation. You can check your account in a moment."
+        });
+      }
+    }, 5000);
   }
 
   return (
@@ -88,6 +140,21 @@ export function PlansPage() {
               <span className="font-display text-5xl font-semibold text-ink">KES {plan.amount}</span>
               <span className="pb-1 text-sm text-neutral-500">/ {plan.duration_days} days</span>
             </div>
+            {plan.billing_mode === "upgrade" && plan.credit_applied > 0 && (
+              <p className="mt-3 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                Includes KES {Number(plan.credit_applied).toFixed(2)} credit from your current plan.
+              </p>
+            )}
+            {plan.billing_mode === "renew" && (
+              <p className="mt-3 text-sm text-neutral-500">
+                Renews from your current expiry date.
+              </p>
+            )}
+            {plan.billing_mode === "upgrade" && (
+              <p className="mt-3 text-sm text-neutral-500">
+                Upgrade starts a fresh {plan.tier.toUpperCase()} term today.
+              </p>
+            )}
             <ul className="mt-7 space-y-3">
               {benefits[plan.tier].map((benefit) => (
                 <li key={benefit} className="flex items-start gap-3 text-sm leading-6 text-neutral-700">
@@ -130,6 +197,19 @@ export function PlansPage() {
           notice.type === "success" ? "border-green-200 bg-green-50 text-green-700" : "border-red-200 bg-red-50 text-red-700"
         }`}>
           {notice.text}
+        </div>
+      )}
+
+      {paymentStatus && paymentStatus.status === "pending" && (
+        <div className="mt-6 flex items-start gap-3 rounded-md border border-yellow-200 bg-yellow-50 px-4 py-4 text-yellow-900">
+          <LoaderCircle className="mt-0.5 shrink-0 animate-spin" size={18} />
+          <div>
+            <p className="font-semibold">Waiting for payment confirmation</p>
+            <p className="mt-1 text-sm">{paymentStatus.message}</p>
+            <p className="mt-1 text-xs text-yellow-700">
+              Keep this page open after entering your M-Pesa PIN.
+            </p>
+          </div>
         </div>
       )}
 

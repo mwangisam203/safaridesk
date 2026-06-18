@@ -82,8 +82,24 @@ def test_lists_subscription_plans():
     assert response.status_code == 200
     assert response.json() == {
         "plans": [
-            {"tier": "basic", "amount": 1, "currency": "KES", "duration_days": 30},
-            {"tier": "pro", "amount": 5, "currency": "KES", "duration_days": 30},
+            {
+                "tier": "basic",
+                "amount": 1,
+                "original_amount": 1,
+                "credit_applied": 0,
+                "billing_mode": "new",
+                "currency": "KES",
+                "duration_days": 30,
+            },
+            {
+                "tier": "pro",
+                "amount": 5,
+                "original_amount": 5,
+                "credit_applied": 0,
+                "billing_mode": "new",
+                "currency": "KES",
+                "duration_days": 30,
+            },
         ]
     }
 
@@ -157,6 +173,70 @@ def test_stk_push_defaults_to_registered_phone(monkeypatch):
     assert fake_db.transactions[0].phone_number == "+254700000001"
 
 
+def test_payment_status_returns_pending_for_current_user():
+    txn = Transaction(
+        user_id=7,
+        mpesa_request_id="ws_CO_pending",
+        merchant_request_id="merchant_pending",
+        amount=Decimal("1.00"),
+        tier=SubscriptionTierInfo.BASIC,
+        transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
+        status=TransactionStatus.PENDING,
+        phone_number="+254712345678",
+    )
+
+    response = make_client(FakeDb([txn])).get("/api/v1/payments/status/ws_CO_pending")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "checkout_request_id": "ws_CO_pending",
+        "status": "pending",
+        "message": "Waiting for M-Pesa confirmation.",
+        "tier": "basic",
+        "receipt_number": None,
+        "failure_reason": None,
+    }
+
+
+def test_payment_status_returns_completed_receipt_for_current_user():
+    txn = Transaction(
+        user_id=7,
+        mpesa_request_id="ws_CO_done",
+        merchant_request_id="merchant_done",
+        amount=Decimal("1.00"),
+        tier=SubscriptionTierInfo.BASIC,
+        transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
+        status=TransactionStatus.COMPLETED,
+        phone_number="+254712345678",
+        mpesa_receipt_number="TST123",
+    )
+
+    response = make_client(FakeDb([txn])).get("/api/v1/payments/status/ws_CO_done")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert response.json()["receipt_number"] == "TST123"
+    assert response.json()["message"] == "Payment confirmed. Your BASIC subscription is active."
+
+
+def test_payment_status_does_not_expose_other_users_payment():
+    txn = Transaction(
+        user_id=99,
+        mpesa_request_id="ws_CO_other",
+        merchant_request_id="merchant_other",
+        amount=Decimal("1.00"),
+        tier=SubscriptionTierInfo.BASIC,
+        transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
+        status=TransactionStatus.PENDING,
+        phone_number="+254712345678",
+    )
+
+    response = make_client(FakeDb([txn])).get("/api/v1/payments/status/ws_CO_other")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Payment request not found."
+
+
 def test_success_callback_completes_transaction_and_activates_subscription(monkeypatch):
     txn = Transaction(
         user_id=7,
@@ -177,7 +257,7 @@ def test_success_callback_completes_transaction_and_activates_subscription(monke
         def __init__(self, db):
             self.db = db
 
-        def activate(self, user_id, tier):
+        def activate(self, user_id, tier, amount_paid=None):
             activated.append((user_id, tier))
 
     monkeypatch.setattr(payments, "SubscriptionService", FakeSubscriptionService)
@@ -238,7 +318,7 @@ def test_success_callback_activates_selected_pro_subscription(monkeypatch):
         def __init__(self, db):
             self.db = db
 
-        def activate(self, user_id, tier):
+        def activate(self, user_id, tier, amount_paid=None):
             activated.append((user_id, tier))
 
     monkeypatch.setattr(payments, "SubscriptionService", FakeSubscriptionService)
@@ -295,7 +375,7 @@ def test_late_success_callback_backfills_receipt_without_duplicate_activation(mo
         def __init__(self, db):
             self.db = db
 
-        def activate(self, user_id, tier):
+        def activate(self, user_id, tier, amount_paid=None):
             raise AssertionError("completed callback should not reactivate subscription")
 
     monkeypatch.setattr(payments, "SubscriptionService", FailIfCalledSubscriptionService)
@@ -417,7 +497,7 @@ def test_reconciler_completes_pending_transaction_and_persists_status(monkeypatc
         def __init__(self, db):
             self.db = db
 
-        def activate(self, user_id, tier):
+        def activate(self, user_id, tier, amount_paid=None):
             activated.append((user_id, tier))
 
     monkeypatch.setattr(reconciler_task, "SubscriptionService", FakeSubscriptionService)

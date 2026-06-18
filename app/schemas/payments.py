@@ -30,6 +30,15 @@ class STKPushResponse(BaseModel):
     merchant_request_id: str
     message: str
 
+
+class PaymentStatusResponse(BaseModel):
+    checkout_request_id: str
+    status: str
+    message: str
+    tier: str | None = None
+    receipt_number: str | None = None
+    failure_reason: str | None = None
+
 class MpesaCallbackMetadataItem(BaseModel):
     Name: str
     Value: str | int | float | None = None
