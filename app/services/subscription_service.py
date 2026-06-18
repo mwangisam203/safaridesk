@@ -31,6 +31,35 @@ class SubscriptionService:
     def __init__(self, db):
         self.db = db
 
+    def _user_subscriptions(self, user_id: int) -> list[Subscription]:
+        query = self.db.query(Subscription).filter_by(user_id=user_id)
+        if hasattr(query, "all"):
+            return [sub for sub in query.all() if sub.user_id == user_id]
+
+        sub = query.first()
+        return [sub] if sub else []
+
+    def _current_subscription(
+        self,
+        user_id: int,
+        now: datetime,
+    ) -> Subscription | None:
+        subscriptions = self._user_subscriptions(user_id)
+        active_subs = []
+        for sub in subscriptions:
+            expires_at = _make_aware(sub.expires_at)
+            if (
+                sub.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.GRACE_PERIOD}
+                and expires_at
+                and expires_at > now
+            ):
+                active_subs.append(sub)
+
+        if not active_subs:
+            return None
+
+        return max(active_subs, key=lambda sub: _make_aware(sub.expires_at) or now)
+
     def quote(self, user_id: int, tier: str) -> dict:
         tier_info = SubscriptionTierInfo(tier)
         now = datetime.now(timezone.utc)
@@ -44,9 +73,11 @@ class SubscriptionService:
             "credit_applied": Decimal("0.00"),
             "duration_days": duration,
             "mode": "new",
+            "starts_at": None,
+            "current_tier": None,
         }
 
-        sub = self.db.query(Subscription).filter_by(user_id=user_id).first()
+        sub = self._current_subscription(user_id, now)
         if not sub:
             return quote
 
@@ -56,6 +87,8 @@ class SubscriptionService:
             return quote
 
         current_tier = sub.tier.value
+        quote["current_tier"] = current_tier
+
         if current_tier == tier_info.value:
             quote["mode"] = "renew"
             return quote
@@ -78,7 +111,12 @@ class SubscriptionService:
             )
             return quote
 
-        quote["mode"] = "change"
+        quote.update(
+            {
+                "mode": "downgrade",
+                "starts_at": expires_at,
+            }
+        )
         return quote
 
     def activate(
@@ -111,7 +149,8 @@ class SubscriptionService:
         now = datetime.now(timezone.utc)
         duration = TIER_DURATIONS.get(tier, 30)
 
-        sub = self.db.query(Subscription).filter_by(user_id=user_id).first()
+        subscriptions = self._user_subscriptions(user_id)
+        sub = self._current_subscription(user_id, now)
 
         if sub:
             # Make expires_at timezone-aware before comparison
@@ -120,6 +159,42 @@ class SubscriptionService:
 
             is_same_tier = sub.tier == tier_info
             is_active = expires_aware and expires_aware > now
+
+            if (
+                is_active
+                and TIER_RANK.get(sub.tier.value, 0) > TIER_RANK.get(tier_info.value, 0)
+            ):
+                starts_at = expires_aware
+                expires_at = starts_at + timedelta(days=duration)
+                pending = next(
+                    (
+                        item
+                        for item in subscriptions
+                        if item.status == SubscriptionStatus.PENDING
+                        and item.tier == tier_info
+                    ),
+                    None,
+                )
+
+                if pending:
+                    pending.started_at = starts_at
+                    pending.expires_at = expires_at
+                    if amount_paid is not None:
+                        pending.amount_paid = Decimal(str(amount_paid))
+                    scheduled = pending
+                else:
+                    scheduled = Subscription(
+                        user_id=user_id,
+                        tier=tier_info,
+                        status=SubscriptionStatus.PENDING,
+                        started_at=starts_at,
+                        expires_at=expires_at,
+                        amount_paid=Decimal(str(amount_paid)) if amount_paid is not None else None,
+                    )
+                    self.db.add(scheduled)
+
+                self.db.commit()
+                return scheduled
 
             # Same-tier renewals extend from current expiry. Tier changes start
             # a fresh target-tier term from now so lower-tier days do not become
@@ -134,15 +209,24 @@ class SubscriptionService:
                 sub.amount_paid = Decimal(str(amount_paid))
 
         else:
-            sub = Subscription(
-                user_id=user_id,
-                tier=tier_info,
-                status=SubscriptionStatus.ACTIVE,
-                started_at=now,
-                expires_at=now + timedelta(days=duration),
-                amount_paid=Decimal(str(amount_paid)) if amount_paid is not None else None,
-            )
-            self.db.add(sub)
+            sub = subscriptions[0] if subscriptions else None
+            if sub:
+                sub.tier = tier_info
+                sub.status = SubscriptionStatus.ACTIVE
+                sub.started_at = now
+                sub.expires_at = now + timedelta(days=duration)
+                if amount_paid is not None:
+                    sub.amount_paid = Decimal(str(amount_paid))
+            else:
+                sub = Subscription(
+                    user_id=user_id,
+                    tier=tier_info,
+                    status=SubscriptionStatus.ACTIVE,
+                    started_at=now,
+                    expires_at=now + timedelta(days=duration),
+                    amount_paid=Decimal(str(amount_paid)) if amount_paid is not None else None,
+                )
+                self.db.add(sub)
 
         # Sync denormalized tier on User — SQLAlchemy 2.0 style
         user = self.db.get(User, user_id)
@@ -151,3 +235,41 @@ class SubscriptionService:
 
         self.db.commit()
         return sub
+
+    def activate_due_scheduled(self, now: datetime | None = None) -> int:
+        now = now or datetime.now(timezone.utc)
+        activated = 0
+
+        scheduled_subs = (
+            self.db.query(Subscription)
+            .filter(Subscription.status == SubscriptionStatus.PENDING)
+            .all()
+        )
+
+        for scheduled in scheduled_subs:
+            if scheduled.status != SubscriptionStatus.PENDING:
+                continue
+
+            starts_at = _make_aware(scheduled.started_at)
+            if not starts_at or starts_at > now:
+                continue
+
+            for current in self._user_subscriptions(scheduled.user_id):
+                if current is scheduled:
+                    continue
+                if current.status in {
+                    SubscriptionStatus.ACTIVE,
+                    SubscriptionStatus.GRACE_PERIOD,
+                }:
+                    current.status = SubscriptionStatus.EXPIRED
+
+            scheduled.status = SubscriptionStatus.ACTIVE
+            user = self.db.get(User, scheduled.user_id)
+            if user:
+                user.subscription_tier = SubscriptionTier(scheduled.tier.value)
+            activated += 1
+
+        if activated:
+            self.db.commit()
+
+        return activated
