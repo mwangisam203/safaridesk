@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.core.dependencies import get_current_user, require_verified_user
 from app.core.security import decode_token
-from app.models.subscription import SubscriptionTierInfo
+from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTierInfo
 from app.models.user import User
 from app.models.transaction import Transaction, TransactionStatus, TransactionType
 from app.services.mpesa_service import MpesaService
@@ -74,6 +74,8 @@ def list_subscription_plans(
                 "original_amount": int(TIER_PRICES["basic"]),
                 "credit_applied": float(basic_quote["credit_applied"]) if basic_quote else 0,
                 "billing_mode": basic_quote["mode"] if basic_quote else "new",
+                "starts_at": basic_quote["starts_at"] if basic_quote else None,
+                "current_tier": basic_quote["current_tier"] if basic_quote else None,
                 "currency": "KES",
                 "duration_days": 30,
             },
@@ -83,6 +85,8 @@ def list_subscription_plans(
                 "original_amount": int(TIER_PRICES["pro"]),
                 "credit_applied": float(pro_quote["credit_applied"]) if pro_quote else 0,
                 "billing_mode": pro_quote["mode"] if pro_quote else "new",
+                "starts_at": pro_quote["starts_at"] if pro_quote else None,
+                "current_tier": pro_quote["current_tier"] if pro_quote else None,
                 "currency": "KES",
                 "duration_days": 30,
             },
@@ -153,6 +157,28 @@ def get_payment_status(
 
     tier = txn.tier.value if txn.tier else None
     if txn.status == TransactionStatus.COMPLETED:
+        scheduled = (
+            db.query(Subscription)
+            .filter_by(
+                user_id=current_user.id,
+                tier=txn.tier,
+                status=SubscriptionStatus.PENDING,
+            )
+            .first()
+            if txn.tier
+            else None
+        )
+        if scheduled:
+            starts_at = scheduled.started_at
+            starts_text = starts_at.strftime("%d %b %Y") if starts_at else "after your current plan ends"
+            return PaymentStatusResponse(
+                checkout_request_id=checkout_request_id,
+                status=txn.status.value,
+                tier=tier,
+                receipt_number=txn.mpesa_receipt_number,
+                message=f"Payment confirmed. Your {tier.upper()} subscription starts on {starts_text}.",
+            )
+
         return PaymentStatusResponse(
             checkout_request_id=checkout_request_id,
             status=txn.status.value,
