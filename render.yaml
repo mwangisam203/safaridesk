@@ -29,6 +29,10 @@ services:
         value: "7"
       - key: EMAIL_VERIFICATION_EXPIRE_HOURS
         value: "24"
+      - key: PASSWORD_RESET_EXPIRE_HOURS
+        value: "1"
+      - key: AUTH_EMAIL_DELIVERY_MODE
+        value: direct
       - key: DATABASE_URL
         sync: false
       - key: REDIS_URL
@@ -78,4 +82,70 @@ services:
       - key: S3_BUCKET_NAME
         sync: false
       - key: S3_PUBLIC_BASE_URL
+        sync: false
+
+  - type: worker
+    name: safaridesk-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: celery -A app.core.celery_app.celery_app worker --loglevel=info
+    autoDeployTrigger: commit
+    envVars:
+      - key: APP_NAME
+        value: SafariDesk
+      - key: APP_ENV
+        value: staging
+      - key: APP_BASE_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: ALGORITHM
+        value: HS256
+      - key: EMAIL_VERIFICATION_EXPIRE_HOURS
+        value: "24"
+      - key: PASSWORD_RESET_EXPIRE_HOURS
+        value: "1"
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: AT_USERNAME
+        value: sandbox
+      - key: AT_API_KEY
+        sync: false
+      - key: AT_SENDER_ID
+        sync: false
+      - key: MAIL_USERNAME
+        sync: false
+      - key: MAIL_PASSWORD
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: MAIL_SERVER
+        sync: false
+      - key: MAIL_PORT
+        value: "587"
+
+  - type: worker
+    name: safaridesk-beat
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: celery -A app.core.celery_app.celery_app beat --loglevel=info
+    autoDeployTrigger: commit
+    envVars:
+      - key: APP_NAME
+        value: SafariDesk
+      - key: APP_ENV
+        value: staging
+      - key: SECRET_KEY
+        sync: false
+      - key: ALGORITHM
+        value: HS256
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
         sync: false

@@ -256,6 +256,7 @@ APP_BASE_URL=https://safaridesk-api.onrender.com
 FRONTEND_URL=https://your-frontend-domain.com
 DATABASE_URL=...
 REDIS_URL=...
+AUTH_EMAIL_DELIVERY_MODE=direct
 MPESA_CALLBACK_URL=https://safaridesk-api.onrender.com/api/v1/payments/mpesa-callback
 MAIL_USERNAME=...
 MAIL_PASSWORD=...
@@ -266,14 +267,39 @@ S3_BUCKET_NAME=...
 S3_PUBLIC_BASE_URL=...
 ```
 
+For early production without a paid worker, keep:
+
+```env
+AUTH_EMAIL_DELIVERY_MODE=direct
+```
+
+With that setting, registration verification emails and password reset emails
+send inside the web request. This is acceptable for low traffic, but the request
+can be slower if SMTP is slow.
+
+Full background work requires three live pieces:
+
+- Render Key Value or another Redis-compatible service.
+- `safaridesk-worker`, running:
+  `celery -A app.core.celery_app.celery_app worker --loglevel=info`
+- `safaridesk-beat`, running:
+  `celery -A app.core.celery_app.celery_app beat --loglevel=info`
+
+Use the same `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY`, `FRONTEND_URL`, and mail
+variables on the web service and worker. Beat also needs `DATABASE_URL`,
+`REDIS_URL`, and `SECRET_KEY`. When you add a worker, set
+`AUTH_EMAIL_DELIVERY_MODE=celery` on the web service. Without worker + Redis,
+payment emails/SMS, subscription reminders, expiry processing, and reconciliation
+jobs will not run.
+
 After deployment, verify:
 
 ```bash
 curl https://safaridesk-api.onrender.com/health
 ```
 
-Then test login, public article listing, a protected admin article route, and
-Swagger at `/docs`.
+Then test login, public article listing, password reset email, verification
+email resend, a protected admin article route, and Swagger at `/docs`.
 
 Where those values live:
 
@@ -305,6 +331,16 @@ demo environments. Ongoing editorial work should be managed through protected
 admin article endpoints, with draft, preview, publish, and unpublish controls.
 Admin access is granted by the database `is_admin` flag, not by hard-coding an
 email address in application code.
+
+To bootstrap the first admin without editing SQL manually, register the user
+normally, point `DATABASE_URL` at the target database, then run:
+
+```bash
+uv run python -m scripts.promote_admin tedpierson328@gmail.com
+```
+
+After the first admin exists, use `/admin/users` to manage user access from the
+application.
 
 ### Admin Publishing
 
@@ -390,6 +426,9 @@ types and cannot be used interchangeably.
 | GET | `/api/v1/auth/me` | Get current user | Yes |
 | GET | `/api/v1/auth/verify-email?token=...` | Verify email using signed link | No |
 | POST | `/api/v1/auth/resend-verification` | Send another verification email | Yes |
+| POST | `/api/v1/auth/resend-verification-email` | Send verification email by account email | No |
+| POST | `/api/v1/auth/forgot-password` | Request password reset email | No |
+| POST | `/api/v1/auth/reset-password` | Reset password using signed token | No |
 | POST | `/api/v1/auth/logout` | Logout client-side JWT session | Yes |
 | POST | `/api/v1/auth/test-email` | Send test email | No |
 
@@ -418,6 +457,8 @@ types and cannot be used interchangeably.
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
 | GET | `/api/v1/users/me/subscription` | Get current user's subscription status | Yes |
+| GET | `/api/v1/users/admin/users` | List users for admin management | Admin |
+| PATCH | `/api/v1/users/admin/users/{id}` | Update user tier/status/admin flags | Admin |
 
 ---
 
