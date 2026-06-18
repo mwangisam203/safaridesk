@@ -42,7 +42,8 @@ export function AppShell({ children }) {
             <NavItem to="/">Library</NavItem>
             <NavItem to="/plans">Plans</NavItem>
             {user && <NavItem to="/account">Account</NavItem>}
-            {user?.is_admin && <NavItem to="/admin/articles">Admin</NavItem>}
+            {user?.is_admin && <NavItem to="/admin/articles">Articles</NavItem>}
+            {user?.is_admin && <NavItem to="/admin/users">Users</NavItem>}
           </nav>
 
           <form
@@ -124,7 +125,12 @@ export function AppShell({ children }) {
               {user && <MobileLink to="/account" onClick={() => setMobileOpen(false)}>Account</MobileLink>}
               {user?.is_admin && (
                 <MobileLink to="/admin/articles" onClick={() => setMobileOpen(false)}>
-                  <span className="inline-flex items-center gap-2"><FilePenLine size={17} />Admin</span>
+                  <span className="inline-flex items-center gap-2"><FilePenLine size={17} />Articles</span>
+                </MobileLink>
+              )}
+              {user?.is_admin && (
+                <MobileLink to="/admin/users" onClick={() => setMobileOpen(false)}>
+                  Users
                 </MobileLink>
               )}
             </nav>

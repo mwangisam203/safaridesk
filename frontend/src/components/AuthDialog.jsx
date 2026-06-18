@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Eye, EyeOff, LoaderCircle, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
@@ -146,6 +147,24 @@ export function AuthDialog({ open, mode: initialMode = "login", onClose }) {
             {busy && <LoaderCircle size={17} className="animate-spin" />}
             {mode === "login" ? "Sign in" : "Create account"}
           </button>
+          {mode === "login" && (
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <Link
+                to="/forgot-password"
+                onClick={onClose}
+                className="font-semibold text-green-700 hover:text-ink"
+              >
+                Forgot password?
+              </Link>
+              <Link
+                to="/resend-verification"
+                onClick={onClose}
+                className="font-semibold text-neutral-500 hover:text-ink"
+              >
+                Resend verification
+              </Link>
+            </div>
+          )}
           {mode === "register" && (
             <p className="text-center text-xs leading-5 text-neutral-500">
               We will email you a verification link before payments are enabled.

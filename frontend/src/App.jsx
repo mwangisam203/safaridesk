@@ -4,10 +4,13 @@ import { AdminRoute } from "./components/AdminRoute";
 import { AdminArticleEditorPage } from "./pages/AdminArticleEditorPage";
 import { AdminArticlePreviewPage } from "./pages/AdminArticlePreviewPage";
 import { AdminArticlesPage } from "./pages/AdminArticlesPage";
+import { AdminUsersPage } from "./pages/AdminUsersPage";
 import { AccountPage } from "./pages/AccountPage";
 import { ArticlePage } from "./pages/ArticlePage";
+import { ForgotPasswordPage, ResendVerificationPage } from "./pages/ForgotPasswordPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { PlansPage } from "./pages/PlansPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { VerifyEmailPage } from "./pages/VerifyEmailPage";
 
 export default function App() {
@@ -18,6 +21,9 @@ export default function App() {
         <Route path="/articles/:slug" element={<ArticlePage />} />
         <Route path="/plans" element={<PlansPage />} />
         <Route path="/account" element={<AccountPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/resend-verification" element={<ResendVerificationPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route
           path="/admin/articles"
@@ -34,6 +40,10 @@ export default function App() {
         <Route
           path="/admin/articles/:slug/preview"
           element={<AdminRoute><AdminArticlePreviewPage /></AdminRoute>}
+        />
+        <Route
+          path="/admin/users"
+          element={<AdminRoute><AdminUsersPage /></AdminRoute>}
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
