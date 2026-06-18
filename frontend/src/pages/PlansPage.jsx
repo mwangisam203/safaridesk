@@ -155,6 +155,11 @@ export function PlansPage() {
                 Upgrade starts a fresh {plan.tier.toUpperCase()} term today.
               </p>
             )}
+            {plan.billing_mode === "downgrade" && (
+              <p className="mt-3 rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
+                Keeps your {plan.current_tier?.toUpperCase()} access active, then starts BASIC after the current plan ends.
+              </p>
+            )}
             <ul className="mt-7 space-y-3">
               {benefits[plan.tier].map((benefit) => (
                 <li key={benefit} className="flex items-start gap-3 text-sm leading-6 text-neutral-700">

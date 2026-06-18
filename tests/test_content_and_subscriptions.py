@@ -398,6 +398,87 @@ def test_subscription_upgrade_starts_fresh_pro_term_without_double_days():
     assert fake_db.commits == 1
 
 
+def test_subscription_quote_schedules_downgrade_after_current_plan():
+    now = datetime.now(timezone.utc)
+    user = make_user(tier=SubscriptionTier.PRO)
+    subscription = Subscription(
+        id=3,
+        user_id=user.id,
+        tier=SubscriptionTierInfo.PRO,
+        status=SubscriptionStatus.ACTIVE,
+        started_at=now - timedelta(days=10),
+        expires_at=now + timedelta(days=20),
+    )
+    fake_db = FakeDb(users=[user], subscriptions=[subscription])
+
+    quote = SubscriptionService(fake_db).quote(user.id, "basic")
+
+    assert quote["mode"] == "downgrade"
+    assert quote["amount"] == 1
+    assert quote["credit_applied"] == 0
+    assert quote["starts_at"] == subscription.expires_at
+    assert quote["current_tier"] == "pro"
+
+
+def test_subscription_downgrade_creates_pending_basic_after_pro_expiry():
+    now = datetime.now(timezone.utc)
+    user = make_user(tier=SubscriptionTier.PRO)
+    pro_subscription = Subscription(
+        id=3,
+        user_id=user.id,
+        tier=SubscriptionTierInfo.PRO,
+        status=SubscriptionStatus.ACTIVE,
+        started_at=now - timedelta(days=10),
+        expires_at=now + timedelta(days=20),
+    )
+    fake_db = FakeDb(users=[user], subscriptions=[pro_subscription])
+
+    scheduled = SubscriptionService(fake_db).activate(user.id, "basic", amount_paid=1)
+
+    assert scheduled is not pro_subscription
+    assert scheduled in fake_db.subscriptions
+    assert scheduled.tier == SubscriptionTierInfo.BASIC
+    assert scheduled.status == SubscriptionStatus.PENDING
+    assert scheduled.started_at == pro_subscription.expires_at
+    assert 29 <= (scheduled.expires_at - scheduled.started_at).days <= 30
+    assert pro_subscription.status == SubscriptionStatus.ACTIVE
+    assert user.subscription_tier == SubscriptionTier.PRO
+    assert fake_db.commits == 1
+
+
+def test_expiration_task_activates_due_scheduled_downgrade():
+    now = datetime.now(timezone.utc)
+    user = make_user(tier=SubscriptionTier.PRO)
+    pro_subscription = Subscription(
+        id=3,
+        user_id=user.id,
+        tier=SubscriptionTierInfo.PRO,
+        status=SubscriptionStatus.ACTIVE,
+        started_at=now - timedelta(days=30),
+        expires_at=now,
+    )
+    scheduled_basic = Subscription(
+        id=4,
+        user_id=user.id,
+        tier=SubscriptionTierInfo.BASIC,
+        status=SubscriptionStatus.PENDING,
+        started_at=now,
+        expires_at=now + timedelta(days=30),
+    )
+    fake_db = FakeDb(
+        users=[user],
+        subscriptions=[pro_subscription, scheduled_basic],
+    )
+
+    result = process_expired_subscriptions(fake_db, now=now)
+
+    assert result == {"reminders_sent": 0, "moved_to_grace": 0, "downgraded": 0}
+    assert pro_subscription.status == SubscriptionStatus.EXPIRED
+    assert scheduled_basic.status == SubscriptionStatus.ACTIVE
+    assert user.subscription_tier == SubscriptionTier.BASIC
+    assert fake_db.commits == 1
+
+
 def test_subscription_activation_renews_expired_subscription_from_now():
     now = datetime.now(timezone.utc)
     user = make_user(tier=SubscriptionTier.BASIC)
