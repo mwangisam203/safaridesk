@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_admin
 from app.models.subscription import Subscription, SubscriptionStatus
 from app.models.user import User, SubscriptionTier
-from app.schemas.user import SubscriptionStatusResponse
+from app.schemas.user import AdminUserUpdate, SubscriptionStatusResponse, UserResponse
 
 router = APIRouter(prefix="/users", tags=["Users"])
 GRACE_PERIOD_DAYS = 3
@@ -71,3 +71,40 @@ def get_my_subscription(
         is_active=True,
         message=f"Your {sub.tier.value.upper()} subscription is active. {days_remaining} day(s) remaining.",
     )
+
+
+@router.get("/admin/users", response_model=list[UserResponse])
+def list_users_for_admin(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    return db.query(User).order_by(User.created_at.desc(), User.id.desc()).all()
+
+
+@router.patch("/admin/users/{user_id}", response_model=UserResponse)
+def update_user_for_admin(
+    user_id: int,
+    request: AdminUserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    updates = request.model_dump(exclude_unset=True)
+    if (
+        user.id == current_user.id
+        and updates.get("is_admin") is False
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot remove your own admin access.",
+        )
+
+    for field, value in updates.items():
+        setattr(user, field, value)
+
+    db.commit()
+    db.refresh(user)
+    return user

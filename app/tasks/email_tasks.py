@@ -7,6 +7,7 @@ from app.models.subscription import Subscription
 from app.models.user import User
 from app.core.config import settings
 from app.core.security import create_email_verification_token
+from app.core.security import create_password_reset_token
 from app.services.email_service import send_email
 
 logger = logging.getLogger(__name__)
@@ -17,8 +18,7 @@ def _format_money(amount: Decimal | float | int | str, currency: str = "KES") ->
     return f"{currency} {value:,.2f}"
 
 
-@celery_app.task(name="app.tasks.email_tasks.send_verification_email")
-def send_verification_email(user_id: int) -> None:
+def send_verification_email_now(user_id: int) -> None:
     db = SessionLocal()
     try:
         user = db.query(User).get(user_id)
@@ -44,6 +44,44 @@ def send_verification_email(user_id: int) -> None:
         raise
     finally:
         db.close()
+
+
+@celery_app.task(name="app.tasks.email_tasks.send_verification_email")
+def send_verification_email(user_id: int) -> None:
+    send_verification_email_now(user_id)
+
+
+def send_password_reset_email_now(user_id: int) -> None:
+    db = SessionLocal()
+    try:
+        user = db.query(User).get(user_id)
+        if not user or not user.is_active:
+            return
+
+        token = create_password_reset_token(user.id)
+        reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?token={token}"
+        send_email(
+            to_email=user.email,
+            subject="Reset your SafariDesk password",
+            body=(
+                f"Hi {user.full_name},\n\n"
+                "Reset your SafariDesk password by opening this link:\n"
+                f"{reset_url}\n\n"
+                f"This link expires in {settings.PASSWORD_RESET_EXPIRE_HOURS} hour(s).\n\n"
+                "If you did not request this reset, you can ignore this email.\n\n"
+                "SafariDesk"
+            ),
+        )
+    except Exception:
+        logger.exception("Password reset email failed for user %s", user_id)
+        raise
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.tasks.email_tasks.send_password_reset_email")
+def send_password_reset_email(user_id: int) -> None:
+    send_password_reset_email_now(user_id)
 
 
 @celery_app.task(name="app.tasks.email_tasks.send_payment_confirmation")

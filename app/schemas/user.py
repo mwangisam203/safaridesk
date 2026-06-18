@@ -19,6 +19,13 @@ class UserResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AdminUserUpdate(BaseModel):
+    subscription_tier: SubscriptionTier | None = None
+    is_active: bool | None = None
+    is_verified: bool | None = None
+    is_admin: bool | None = None
+
+
 from typing import Optional
 from app.models.subscription import SubscriptionStatus, SubscriptionTierInfo
 

@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from jose import JWTError
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -13,16 +14,41 @@ from app.core.security import (
 )
 from app.models.user import User
 from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
-from app.tasks.email_tasks import send_verification_email
+from app.tasks.email_tasks import (
+    send_password_reset_email,
+    send_password_reset_email_now,
+    send_verification_email,
+    send_verification_email_now,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _queue_verification_email(user_id: int) -> None:
+def _deliver_auth_email(task, direct_send, user_id: int, description: str) -> None:
+    if settings.AUTH_EMAIL_DELIVERY_MODE.lower() == "celery":
+        try:
+            task.delay(user_id)
+            return
+        except Exception:
+            logger.exception("Could not queue %s for user %s", description, user_id)
+
     try:
-        send_verification_email.delay(user_id)
-    except Exception:
-        logger.exception("Could not queue verification email for user %s", user_id)
+        direct_send(user_id)
+    except Exception as exc:
+        logger.exception("Could not send %s for user %s", description, user_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"{description.capitalize()} could not be sent. Try again shortly.",
+        ) from exc
+
+
+def _queue_verification_email(user_id: int) -> None:
+    _deliver_auth_email(
+        send_verification_email,
+        send_verification_email_now,
+        user_id,
+        "verification email",
+    )
 
 
 def register_user(request: RegisterRequest, db: Session) -> User:
@@ -146,11 +172,46 @@ def verify_user_email(token: str, db: Session) -> User:
 def resend_user_verification(user: User) -> bool:
     if user.is_verified:
         return False
-    try:
-        send_verification_email.delay(user.id)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Verification email could not be queued. Try again shortly.",
-        ) from exc
+    _queue_verification_email(user.id)
     return True
+
+
+def request_verification_by_email(email: str, db: Session) -> None:
+    user = db.query(User).filter(User.email == email).first()
+    if not user or user.is_verified or not user.is_active:
+        return
+    _queue_verification_email(user.id)
+
+
+def request_password_reset(email: str, db: Session) -> None:
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not user.is_active:
+        return
+    _deliver_auth_email(
+        send_password_reset_email,
+        send_password_reset_email_now,
+        user.id,
+        "password reset email",
+    )
+
+
+def reset_user_password(token: str, password: str, db: Session) -> None:
+    invalid_token = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Invalid or expired password reset link.",
+    )
+
+    try:
+        payload = decode_token(token)
+        if payload.get("purpose") != "password_reset":
+            raise invalid_token
+        user_id = int(payload["sub"])
+    except (JWTError, KeyError, TypeError, ValueError) as exc:
+        raise invalid_token from exc
+
+    user = db.get(User, user_id)
+    if not user or not user.is_active:
+        raise invalid_token
+
+    user.hashed_password = hash_password(password)
+    db.commit()

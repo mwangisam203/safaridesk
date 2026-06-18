@@ -3,7 +3,9 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.auth import (
+    EmailRequest,
     LoginRequest,
+    PasswordResetRequest,
     RegisterRequest,
     TokenRefreshRequest,
     TokenResponse,
@@ -13,9 +15,12 @@ from app.schemas.user import UserResponse
 from app.services.auth_service import (
     login_user,
     login_user_by_email,
+    request_password_reset,
+    request_verification_by_email,
     refresh_user_tokens,
     register_user,
     resend_user_verification,
+    reset_user_password,
     verify_user_email,
 )
 from app.services.email_service import send_test_email
@@ -83,6 +88,29 @@ def resend_verification(current_user: User = Depends(get_current_user)):
         message="Verification email sent.",
         is_verified=False,
     )
+
+
+@router.post("/resend-verification-email", response_model=VerificationResponse)
+def resend_verification_email(request: EmailRequest, db: Session = Depends(get_db)):
+    request_verification_by_email(request.email, db)
+    return VerificationResponse(
+        message="If this account exists and is not verified, a verification email has been sent.",
+        is_verified=False,
+    )
+
+
+@router.post("/forgot-password")
+def forgot_password(request: EmailRequest, db: Session = Depends(get_db)):
+    request_password_reset(request.email, db)
+    return {
+        "message": "If this account exists, a password reset email has been sent."
+    }
+
+
+@router.post("/reset-password")
+def reset_password(request: PasswordResetRequest, db: Session = Depends(get_db)):
+    reset_user_password(request.token, request.password, db)
+    return {"message": "Password reset successfully. You can now sign in."}
 
 
 @router.post("/test-email")

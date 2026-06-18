@@ -48,6 +48,24 @@ class TokenRefreshRequest(BaseModel):
     refresh_token: str
 
 
+class EmailRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetRequest(BaseModel):
+    token: str
+    password: str
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Password must be 72 bytes or fewer")
+        return v
+
+
 class VerificationResponse(BaseModel):
     message: str
     is_verified: bool

@@ -6,6 +6,7 @@ from app.core import dependencies
 from app.core.security import (
     create_access_token,
     create_email_verification_token,
+    create_password_reset_token,
     create_refresh_token,
     decode_token,
     hash_password,
@@ -32,6 +33,15 @@ class FakeQuery:
             if all(self._matches(row, criterion) for criterion in self.criteria):
                 return row
         return None
+
+    def all(self):
+        return [
+            row for row in self.rows
+            if all(self._matches(row, criterion) for criterion in self.criteria)
+        ]
+
+    def order_by(self, *args):
+        return self
 
     def _matches(self, row, criterion):
         left = getattr(criterion, "left", None)
@@ -95,14 +105,16 @@ class DummyTask:
 
 
 def make_user(
+    user_id=7,
     email="sam@example.com",
     phone_number="+254700000001",
     password="strongpass123",
     is_active=True,
     is_verified=False,
+    is_admin=False,
 ):
     return User(
-        id=7,
+        id=user_id,
         email=email,
         phone_number=phone_number,
         hashed_password=hash_password(password),
@@ -110,7 +122,7 @@ def make_user(
         subscription_tier=SubscriptionTier.FREE,
         is_active=is_active,
         is_verified=is_verified,
-        is_admin=False,
+        is_admin=is_admin,
         created_at=datetime.now(timezone.utc),
     )
 
@@ -127,6 +139,7 @@ def teardown_function():
 def test_register_creates_user_and_queues_verification_email(monkeypatch):
     fake_db = FakeDb()
     verification_task = DummyTask()
+    monkeypatch.setattr(auth_service.settings, "AUTH_EMAIL_DELIVERY_MODE", "celery")
     monkeypatch.setattr(auth_service, "send_verification_email", verification_task)
 
     response = make_client(fake_db).post(
@@ -359,6 +372,7 @@ def test_resend_verification_queues_email(monkeypatch):
     user = make_user()
     fake_db = FakeDb(users=[user])
     verification_task = DummyTask()
+    monkeypatch.setattr(auth_service.settings, "AUTH_EMAIL_DELIVERY_MODE", "celery")
     monkeypatch.setattr(auth_service, "send_verification_email", verification_task)
     app.dependency_overrides[dependencies.get_current_user] = lambda: user
 
@@ -376,6 +390,7 @@ def test_resend_verification_is_idempotent_for_verified_user(monkeypatch):
     user = make_user(is_verified=True)
     fake_db = FakeDb(users=[user])
     verification_task = DummyTask()
+    monkeypatch.setattr(auth_service.settings, "AUTH_EMAIL_DELIVERY_MODE", "celery")
     monkeypatch.setattr(auth_service, "send_verification_email", verification_task)
     app.dependency_overrides[dependencies.get_current_user] = lambda: user
 
@@ -387,3 +402,151 @@ def test_resend_verification_is_idempotent_for_verified_user(monkeypatch):
         "is_verified": True,
     }
     assert verification_task.calls == []
+
+
+def test_public_resend_verification_queues_email_without_login(monkeypatch):
+    user = make_user(email="sam@example.com", is_verified=False)
+    fake_db = FakeDb(users=[user])
+    verification_task = DummyTask()
+    monkeypatch.setattr(auth_service.settings, "AUTH_EMAIL_DELIVERY_MODE", "celery")
+    monkeypatch.setattr(auth_service, "send_verification_email", verification_task)
+
+    response = make_client(fake_db).post(
+        "/api/v1/auth/resend-verification-email",
+        json={"email": "sam@example.com"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"].startswith("If this account exists")
+    assert verification_task.calls == [(user.id,)]
+
+
+def test_public_resend_verification_does_not_reveal_missing_email(monkeypatch):
+    fake_db = FakeDb()
+    verification_task = DummyTask()
+    monkeypatch.setattr(auth_service.settings, "AUTH_EMAIL_DELIVERY_MODE", "celery")
+    monkeypatch.setattr(auth_service, "send_verification_email", verification_task)
+
+    response = make_client(fake_db).post(
+        "/api/v1/auth/resend-verification-email",
+        json={"email": "missing@example.com"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"].startswith("If this account exists")
+    assert verification_task.calls == []
+
+
+def test_public_resend_verification_can_send_directly(monkeypatch):
+    user = make_user(email="sam@example.com", is_verified=False)
+    fake_db = FakeDb(users=[user])
+    direct_calls = []
+    monkeypatch.setattr(auth_service.settings, "AUTH_EMAIL_DELIVERY_MODE", "direct")
+    monkeypatch.setattr(
+        auth_service,
+        "send_verification_email_now",
+        lambda user_id: direct_calls.append(user_id),
+    )
+
+    response = make_client(fake_db).post(
+        "/api/v1/auth/resend-verification-email",
+        json={"email": "sam@example.com"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"].startswith("If this account exists")
+    assert direct_calls == [user.id]
+
+
+def test_forgot_password_queues_reset_email_without_revealing_account(monkeypatch):
+    user = make_user(email="sam@example.com")
+    fake_db = FakeDb(users=[user])
+    reset_task = DummyTask()
+    monkeypatch.setattr(auth_service.settings, "AUTH_EMAIL_DELIVERY_MODE", "celery")
+    monkeypatch.setattr(auth_service, "send_password_reset_email", reset_task)
+
+    response = make_client(fake_db).post(
+        "/api/v1/auth/forgot-password",
+        json={"email": "sam@example.com"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"].startswith("If this account exists")
+    assert reset_task.calls == [(user.id,)]
+
+
+def test_reset_password_updates_hash():
+    user = make_user(password="oldpass123")
+    fake_db = FakeDb(users=[user])
+    token = create_password_reset_token(user.id)
+
+    response = make_client(fake_db).post(
+        "/api/v1/auth/reset-password",
+        json={"token": token, "password": "newpass123"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Password reset successfully. You can now sign in."
+    assert fake_db.commits == 1
+    assert auth_service.verify_password("newpass123", user.hashed_password)
+
+
+def test_reset_password_rejects_verification_token():
+    user = make_user(password="oldpass123")
+    fake_db = FakeDb(users=[user])
+    token = create_email_verification_token(user.id)
+
+    response = make_client(fake_db).post(
+        "/api/v1/auth/reset-password",
+        json={"token": token, "password": "newpass123"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid or expired password reset link."
+
+
+def test_admin_can_list_users():
+    admin = make_user(user_id=1, email="admin@example.com", is_verified=True, is_admin=True)
+    user = make_user(user_id=2, email="reader@example.com")
+    fake_db = FakeDb(users=[admin, user])
+    app.dependency_overrides[dependencies.require_admin] = lambda: admin
+
+    response = make_client(fake_db).get("/api/v1/users/admin/users")
+
+    assert response.status_code == 200
+    assert [item["email"] for item in response.json()] == [
+        "admin@example.com",
+        "reader@example.com",
+    ]
+
+
+def test_admin_can_update_user_flags():
+    admin = make_user(user_id=1, email="admin@example.com", is_verified=True, is_admin=True)
+    user = make_user(user_id=2, email="reader@example.com", is_verified=False)
+    fake_db = FakeDb(users=[admin, user])
+    app.dependency_overrides[dependencies.require_admin] = lambda: admin
+
+    response = make_client(fake_db).patch(
+        f"/api/v1/users/admin/users/{user.id}",
+        json={"is_verified": True, "is_active": False, "subscription_tier": "basic"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["is_verified"] is True
+    assert response.json()["is_active"] is False
+    assert response.json()["subscription_tier"] == "basic"
+    assert fake_db.commits == 1
+
+
+def test_admin_cannot_remove_own_admin_access():
+    admin = make_user(user_id=1, email="admin@example.com", is_verified=True, is_admin=True)
+    fake_db = FakeDb(users=[admin])
+    app.dependency_overrides[dependencies.require_admin] = lambda: admin
+
+    response = make_client(fake_db).patch(
+        f"/api/v1/users/admin/users/{admin.id}",
+        json={"is_admin": False},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "You cannot remove your own admin access."

@@ -48,6 +48,16 @@ def create_email_verification_token(user_id: int) -> str:
     )
 
 
+def create_password_reset_token(user_id: int) -> str:
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        hours=settings.PASSWORD_RESET_EXPIRE_HOURS
+    )
+    return _create_token(
+        data={"sub": str(user_id), "purpose": "password_reset"},
+        expires_at=expires_at,
+    )
+
+
 def decode_token(token: str) -> dict:
     return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
 
