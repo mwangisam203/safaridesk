@@ -7,6 +7,7 @@ from app.db.base import SessionLocal
 from app.models.audit_log import AuditLog
 from app.models.subscription import Subscription, SubscriptionStatus
 from app.models.user import SubscriptionTier, User
+from app.services.subscription_service import SubscriptionService
 from app.tasks.email_tasks import send_subscription_renewal_reminder
 from app.tasks.sms_tasks import send_subscription_renewal_reminder_sms
 
@@ -40,6 +41,8 @@ def process_subscription_expirations():
 
 def process_expired_subscriptions(db, now: datetime | None = None) -> dict[str, int]:
     now = now or datetime.now(timezone.utc)
+    SubscriptionService(db).activate_due_scheduled(now)
+
     moved_to_grace = 0
     downgraded = 0
     reminders_sent = 0
