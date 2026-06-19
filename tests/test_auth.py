@@ -575,6 +575,64 @@ def test_reset_password_rejects_verification_token():
     assert response.json()["detail"] == "Invalid or expired password reset link."
 
 
+def test_logged_in_user_can_change_password():
+    user = make_user(password="oldpass123", is_active=True)
+    fake_db = FakeDb(users=[user])
+    app.dependency_overrides[dependencies.get_current_user] = lambda: user
+
+    response = make_client(fake_db).post(
+        "/api/v1/auth/change-password",
+        json={
+            "current_password": "oldpass123",
+            "new_password": "newpass123",
+            "confirm_password": "newpass123",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Password changed successfully. Please sign in again."
+    assert fake_db.commits == 1
+    assert auth_service.verify_password("newpass123", user.hashed_password)
+
+
+def test_change_password_rejects_wrong_current_password():
+    user = make_user(password="oldpass123", is_active=True)
+    fake_db = FakeDb(users=[user])
+    app.dependency_overrides[dependencies.get_current_user] = lambda: user
+
+    response = make_client(fake_db).post(
+        "/api/v1/auth/change-password",
+        json={
+            "current_password": "wrongpass123",
+            "new_password": "newpass123",
+            "confirm_password": "newpass123",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Current password is incorrect."
+    assert fake_db.commits == 0
+    assert auth_service.verify_password("oldpass123", user.hashed_password)
+
+
+def test_change_password_requires_matching_confirmation():
+    user = make_user(password="oldpass123", is_active=True)
+    fake_db = FakeDb(users=[user])
+    app.dependency_overrides[dependencies.get_current_user] = lambda: user
+
+    response = make_client(fake_db).post(
+        "/api/v1/auth/change-password",
+        json={
+            "current_password": "oldpass123",
+            "new_password": "newpass123",
+            "confirm_password": "different123",
+        },
+    )
+
+    assert response.status_code == 422
+    assert fake_db.commits == 0
+
+
 def test_admin_can_list_users():
     admin = make_user(user_id=1, email="admin@example.com", is_verified=True, is_admin=True)
     user = make_user(user_id=2, email="reader@example.com")
