@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+import logging
 from typing import Optional
 import uuid
 
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.core.config import settings
 from app.core.dependencies import get_current_user, require_admin
+from app.core.observability import log_event
 from app.models.article import Article, ArticleTier
 from app.models.audit_log import AuditLog
 from app.models.free_article_read import FreeArticleRead
@@ -31,6 +33,7 @@ from app.schemas.article import (
 from app.services.image_storage import ImageUploadError, store_article_image
 
 router = APIRouter(prefix="/content", tags=["Content"])
+logger = logging.getLogger(__name__)
 
 FREE_ARTICLE_LIMIT = 10
 FREE_RESET_DAYS = 10
@@ -430,17 +433,65 @@ async def upload_article_image(
     image: UploadFile = File(...),
     current_user: User = Depends(require_admin),
 ):
+    current_user_id = getattr(current_user, "id", None)
     max_bytes = settings.IMAGE_UPLOAD_MAX_MB * 1024 * 1024
     data = await image.read(max_bytes + 1)
 
     try:
         stored = store_article_image(data, image.content_type, image.filename)
     except ImageUploadError as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            "content.image_upload.rejected",
+            user_id=current_user_id,
+            filename=image.filename,
+            content_type=image.content_type,
+            size_bytes=len(data),
+            reason=str(exc),
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            "content.image_upload.storage_error",
+            user_id=current_user_id,
+            filename=image.filename,
+            content_type=image.content_type,
+            size_bytes=len(data),
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            "content.image_upload.unexpected_error",
+            user_id=current_user_id,
+            filename=image.filename,
+            content_type=image.content_type,
+            size_bytes=len(data),
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=503, detail="Image upload failed.") from exc
     finally:
         await image.close()
+
+    log_event(
+        logger,
+        logging.INFO,
+        "content.image_upload.stored",
+        user_id=current_user_id,
+        filename=image.filename,
+        content_type=stored.content_type,
+        size_bytes=stored.size_bytes,
+        width=stored.width,
+        height=stored.height,
+        storage_backend=settings.IMAGE_STORAGE_BACKEND,
+    )
 
     return {
         "url": stored.url,

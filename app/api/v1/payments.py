@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.core.dependencies import get_current_user, require_verified_user
+from app.core.observability import client_ip, log_event
 from app.core.rate_limit import rate_limit
 from app.core.security import decode_token
 from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTierInfo
@@ -17,6 +18,7 @@ import logging
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 mpesa  = MpesaService()
+logger = logging.getLogger(__name__)
 
 def _extract_callback_metadata(stk_callback: dict) -> dict:
     items = stk_callback.get("CallbackMetadata", {}).get("Item", [])
@@ -102,12 +104,24 @@ def list_subscription_plans(
 )
 async def initiate_payment(
     body: STKPushRequest,
+    request: Request,
     current_user: User = Depends(require_verified_user),
     db: Session = Depends(get_db),
 ):
     tier = SubscriptionTierInfo(body.tier.value)
     amount = SubscriptionService(db).quote(current_user.id, tier.value)["amount"]
     payment_phone = body.phone_number or current_user.phone_number
+
+    log_event(
+        logger,
+        logging.INFO,
+        "payment.stk_push.requested",
+        user_id=current_user.id,
+        tier=tier,
+        amount=amount,
+        phone_provided=bool(body.phone_number),
+        client_ip=client_ip(request),
+    )
 
     try:
         result = await mpesa.initiate_stk_push(
@@ -117,10 +131,31 @@ async def initiate_payment(
             description=f"{tier.value.upper()} subscription",
         )
     except Exception as e:
-        logging.error(f"STK Push failed: {e}")
+        log_event(
+            logger,
+            logging.ERROR,
+            "payment.stk_push.provider_error",
+            user_id=current_user.id,
+            tier=tier,
+            amount=amount,
+            error_type=type(e).__name__,
+            error=str(e),
+            client_ip=client_ip(request),
+        )
         raise HTTPException(502, "M-Pesa request failed. Try again.")
 
     if result.get("ResponseCode") != "0":
+        log_event(
+            logger,
+            logging.WARNING,
+            "payment.stk_push.rejected",
+            user_id=current_user.id,
+            tier=tier,
+            amount=amount,
+            response_code=result.get("ResponseCode"),
+            response_description=result.get("ResponseDescription"),
+            client_ip=client_ip(request),
+        )
         raise HTTPException(400, result.get("ResponseDescription", "STK Push rejected"))
 
     # Persist pending transaction
@@ -138,6 +173,18 @@ async def initiate_payment(
     )
     db.add(txn)
     db.commit()
+
+    log_event(
+        logger,
+        logging.INFO,
+        "payment.stk_push.accepted",
+        user_id=current_user.id,
+        transaction_id=txn.id,
+        checkout_request_id=txn.mpesa_request_id,
+        merchant_request_id=txn.merchant_request_id,
+        tier=tier,
+        amount=amount,
+    )
 
     return STKPushResponse(
         checkout_request_id=result["CheckoutRequestID"],
@@ -220,16 +267,43 @@ async def mpesa_callback(request: Request, db: Session = Depends(get_db)):
         checkout_id  = stk_callback["CheckoutRequestID"]
         result_code  = stk_callback["ResultCode"]
 
+        log_event(
+            logger,
+            logging.INFO,
+            "payment.callback.received",
+            checkout_request_id=checkout_id,
+            result_code=result_code,
+            result_description=stk_callback.get("ResultDesc"),
+            client_ip=client_ip(request),
+        )
+
         txn = db.query(Transaction).filter_by(
             mpesa_request_id=checkout_id
         ).first()
 
         if not txn:
+            log_event(
+                logger,
+                logging.WARNING,
+                "payment.callback.unknown_checkout",
+                checkout_request_id=checkout_id,
+                result_code=result_code,
+            )
             return {"ResultCode": 0, "ResultDesc": "Accepted"}  # unknown, ignore
 
         if txn.status != TransactionStatus.PENDING:
             if result_code == 0:
                 _backfill_completed_receipt(txn, stk_callback, payload, db)
+            log_event(
+                logger,
+                logging.INFO,
+                "payment.callback.idempotent_skip",
+                transaction_id=txn.id,
+                user_id=txn.user_id,
+                checkout_request_id=checkout_id,
+                transaction_status=txn.status,
+                result_code=result_code,
+            )
             return {"ResultCode": 0, "ResultDesc": "Accepted"}  # idempotency guard
 
         txn.raw_callback = payload
@@ -253,6 +327,17 @@ async def mpesa_callback(request: Request, db: Session = Depends(get_db)):
             from app.tasks.sms_tasks import send_payment_confirmation_sms
             send_payment_confirmation.delay(txn.user_id, txn.mpesa_receipt_number, str(txn.amount))
             send_payment_confirmation_sms.delay(txn.user_id, str(txn.amount))
+            log_event(
+                logger,
+                logging.INFO,
+                "payment.callback.completed",
+                transaction_id=txn.id,
+                user_id=txn.user_id,
+                checkout_request_id=checkout_id,
+                tier=txn.tier,
+                amount=txn.amount,
+                receipt_present=bool(txn.mpesa_receipt_number),
+            )
 
         else:
             txn.status = TransactionStatus.FAILED
@@ -261,9 +346,26 @@ async def mpesa_callback(request: Request, db: Session = Depends(get_db)):
 
             from app.tasks.email_tasks import send_payment_failed
             send_payment_failed.delay(txn.user_id, str(txn.amount), txn.failure_reason)
+            log_event(
+                logger,
+                logging.WARNING,
+                "payment.callback.failed",
+                transaction_id=txn.id,
+                user_id=txn.user_id,
+                checkout_request_id=checkout_id,
+                result_code=result_code,
+                failure_reason=txn.failure_reason,
+            )
 
     except Exception as e:
-        logging.error(f"Callback processing error: {e}")
+        log_event(
+            logger,
+            logging.ERROR,
+            "payment.callback.processing_error",
+            error_type=type(e).__name__,
+            error=str(e),
+            client_ip=client_ip(request),
+        )
         # Still return 200 — never let Safaricom see a 5xx
 
     return {"ResultCode": 0, "ResultDesc": "Accepted"}
