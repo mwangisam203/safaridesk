@@ -17,6 +17,7 @@ import { formatDate } from "../lib/content";
 export function AccountPage() {
   const { user, subscription, loading } = useAuth();
   const [verificationMessage, setVerificationMessage] = useState("");
+  const [verificationRequested, setVerificationRequested] = useState(false);
   const [busy, setBusy] = useState(false);
 
   if (loading) return <div className="grid min-h-[70vh] place-items-center"><LoaderCircle className="animate-spin text-green-600" /></div>;
@@ -24,6 +25,7 @@ export function AccountPage() {
 
   async function resendVerification() {
     setBusy(true);
+    setVerificationRequested(true);
     try {
       const result = await api("/api/v1/auth/resend-verification", { method: "POST" });
       setVerificationMessage(result.message);
@@ -67,7 +69,7 @@ export function AccountPage() {
             className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-ink px-4 text-sm font-semibold text-white"
           >
             {busy ? <LoaderCircle size={16} className="animate-spin" /> : <MailCheck size={16} />}
-            Resend email
+            {busy ? "Sending..." : verificationRequested ? "Resend email" : "Verify your email"}
           </button>
           {verificationMessage && <span className="text-sm text-yellow-900">{verificationMessage}</span>}
         </div>
