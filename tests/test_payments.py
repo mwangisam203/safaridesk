@@ -7,6 +7,7 @@ from app.api.v1 import payments
 from app.core import dependencies
 from app.core.rate_limit import reset_rate_limits
 from app.db import session
+from app.models.notification import Notification
 from app.tasks import reconciler_task
 from app.models.subscription import SubscriptionTierInfo
 from app.models.transaction import Transaction, TransactionStatus, TransactionType
@@ -31,19 +32,28 @@ class FakeQuery:
 
 
 class FakeDb:
-    def __init__(self, transactions=None):
+    def __init__(self, transactions=None, notifications=None):
         self.transactions = transactions or []
+        self.notifications = notifications or []
         self.commits = 0
 
     def add(self, row):
-        self.transactions.append(row)
+        if isinstance(row, Transaction):
+            self.transactions.append(row)
+        if isinstance(row, Notification):
+            self.notifications.append(row)
 
     def commit(self):
         self.commits += 1
 
+    def rollback(self):
+        pass
+
     def query(self, model):
         if model is Transaction:
             return FakeQuery(self.transactions)
+        if model is Notification:
+            return FakeQuery(self.notifications)
         return FakeQuery([])
 
 

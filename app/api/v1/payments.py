@@ -11,6 +11,7 @@ from app.models.subscription import Subscription, SubscriptionStatus, Subscripti
 from app.models.user import User
 from app.models.transaction import Transaction, TransactionStatus, TransactionType
 from app.services.mpesa_service import MpesaService
+from app.services.notification_service import notify_payment_completed, notify_payment_failed
 from app.services.subscription_service import SubscriptionService, TIER_PRICES
 from app.schemas.payments import PaymentStatusResponse, STKPushRequest, STKPushResponse
 #from app.core.audit import log_action  #
@@ -165,6 +166,13 @@ def _apply_direct_reconcile_result(txn: Transaction, result: dict, db: Session) 
         )
         db.commit()
         SubscriptionService(db).activate(txn.user_id, txn.tier.value, amount_paid=txn.amount)
+        notify_payment_completed(
+            db,
+            user_id=txn.user_id,
+            transaction_id=txn.id,
+            tier=txn.tier.value,
+            amount=str(txn.amount),
+        )
         return True
 
     if result_code == "1032":
@@ -182,6 +190,13 @@ def _apply_direct_reconcile_result(txn: Transaction, result: dict, db: Session) 
         txn.failure_reason = result_desc
 
     db.commit()
+    notify_payment_failed(
+        db,
+        user_id=txn.user_id,
+        transaction_id=txn.id,
+        reason=txn.failure_reason,
+        cancelled=txn.status == TransactionStatus.CANCELLED,
+    )
     return True
 
 
@@ -463,6 +478,13 @@ async def mpesa_callback(request: Request, db: Session = Depends(get_db)):
 
             # Upgrade subscription
             SubscriptionService(db).activate(txn.user_id, txn.tier.value, amount_paid=txn.amount)
+            notify_payment_completed(
+                db,
+                user_id=txn.user_id,
+                transaction_id=txn.id,
+                tier=txn.tier.value,
+                amount=str(txn.amount),
+            )
 
             # Fire-and-forget email (Celery)
             from app.tasks.email_tasks import send_payment_confirmation
@@ -485,6 +507,13 @@ async def mpesa_callback(request: Request, db: Session = Depends(get_db)):
             txn.status = TransactionStatus.FAILED
             txn.failure_reason = stk_callback.get("ResultDesc")
             db.commit()
+            notify_payment_failed(
+                db,
+                user_id=txn.user_id,
+                transaction_id=txn.id,
+                reason=txn.failure_reason,
+                cancelled=False,
+            )
 
             from app.tasks.email_tasks import send_payment_failed
             send_payment_failed.delay(txn.user_id, str(txn.amount), txn.failure_reason)
