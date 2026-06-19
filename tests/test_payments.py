@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -193,6 +194,7 @@ def test_payment_status_returns_pending_for_current_user():
         transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
         status=TransactionStatus.PENDING,
         phone_number="+254712345678",
+        initiated_at=datetime.now(timezone.utc),
     )
 
     response = make_client(FakeDb([txn])).get("/api/v1/payments/status/ws_CO_pending")
@@ -206,6 +208,131 @@ def test_payment_status_returns_pending_for_current_user():
         "receipt_number": None,
         "failure_reason": None,
     }
+
+
+def test_payment_status_does_not_query_mpesa_before_pending_age(monkeypatch):
+    txn = Transaction(
+        user_id=7,
+        mpesa_request_id="ws_CO_fresh_pending",
+        merchant_request_id="merchant_fresh_pending",
+        amount=Decimal("1.00"),
+        tier=SubscriptionTierInfo.BASIC,
+        transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
+        status=TransactionStatus.PENDING,
+        phone_number="+254712345678",
+        initiated_at=datetime.now(timezone.utc),
+    )
+
+    async def fail_if_called(checkout_request_id):
+        raise AssertionError("fresh pending payments should not be reconciled")
+
+    monkeypatch.setattr(payments.mpesa, "query_stk_status", fail_if_called)
+
+    response = make_client(FakeDb([txn])).get("/api/v1/payments/status/ws_CO_fresh_pending")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+    assert txn.reconcile_attempts in (None, 0)
+
+
+def test_payment_status_directly_reconciles_stale_success(monkeypatch):
+    txn = Transaction(
+        user_id=7,
+        mpesa_request_id="ws_CO_stale_success",
+        merchant_request_id="merchant_stale_success",
+        amount=Decimal("1.00"),
+        tier=SubscriptionTierInfo.BASIC,
+        transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
+        status=TransactionStatus.PENDING,
+        phone_number="+254712345678",
+        initiated_at=datetime.now(timezone.utc) - timedelta(minutes=2),
+    )
+    fake_db = FakeDb([txn])
+    activated = []
+
+    async def fake_query(checkout_request_id):
+        assert checkout_request_id == "ws_CO_stale_success"
+        return {
+            "ResultCode": "0",
+            "ResultDesc": "The service request is processed successfully.",
+            "MpesaReceiptNumber": "DIRECT123",
+        }
+
+    class FakeSubscriptionService:
+        def __init__(self, db):
+            self.db = db
+
+        def activate(self, user_id, tier, amount_paid=None):
+            activated.append((user_id, tier, amount_paid))
+
+    monkeypatch.setattr(payments.mpesa, "query_stk_status", fake_query)
+    monkeypatch.setattr(payments, "SubscriptionService", FakeSubscriptionService)
+
+    response = make_client(fake_db).get("/api/v1/payments/status/ws_CO_stale_success")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert response.json()["receipt_number"] == "DIRECT123"
+    assert txn.status == TransactionStatus.COMPLETED
+    assert txn.reconcile_attempts == 1
+    assert txn.last_reconciled_at is not None
+    assert activated == [(7, "basic", Decimal("1.00"))]
+
+
+def test_payment_status_direct_reconcile_respects_cooldown(monkeypatch):
+    txn = Transaction(
+        user_id=7,
+        mpesa_request_id="ws_CO_cooldown",
+        merchant_request_id="merchant_cooldown",
+        amount=Decimal("1.00"),
+        tier=SubscriptionTierInfo.BASIC,
+        transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
+        status=TransactionStatus.PENDING,
+        phone_number="+254712345678",
+        initiated_at=datetime.now(timezone.utc) - timedelta(minutes=2),
+        reconcile_attempts=1,
+        last_reconciled_at=datetime.now(timezone.utc),
+    )
+
+    async def fail_if_called(checkout_request_id):
+        raise AssertionError("cooldown should prevent another provider query")
+
+    monkeypatch.setattr(payments.mpesa, "query_stk_status", fail_if_called)
+
+    response = make_client(FakeDb([txn])).get("/api/v1/payments/status/ws_CO_cooldown")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+    assert txn.reconcile_attempts == 1
+
+
+def test_payment_status_directly_reconciles_cancelled_payment(monkeypatch):
+    txn = Transaction(
+        user_id=7,
+        mpesa_request_id="ws_CO_cancelled",
+        merchant_request_id="merchant_cancelled",
+        amount=Decimal("1.00"),
+        tier=SubscriptionTierInfo.BASIC,
+        transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
+        status=TransactionStatus.PENDING,
+        phone_number="+254712345678",
+        initiated_at=datetime.now(timezone.utc) - timedelta(minutes=2),
+    )
+
+    async def fake_query(checkout_request_id):
+        return {
+            "ResultCode": "1032",
+            "ResultDesc": "Request cancelled by user",
+        }
+
+    monkeypatch.setattr(payments.mpesa, "query_stk_status", fake_query)
+
+    response = make_client(FakeDb([txn])).get("/api/v1/payments/status/ws_CO_cancelled")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    assert response.json()["failure_reason"] == "Request cancelled by user"
+    assert txn.status == TransactionStatus.CANCELLED
 
 
 def test_payment_status_returns_completed_receipt_for_current_user():

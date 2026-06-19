@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -19,6 +19,18 @@ import logging
 router = APIRouter(prefix="/payments", tags=["Payments"])
 mpesa  = MpesaService()
 logger = logging.getLogger(__name__)
+
+DIRECT_RECONCILE_AFTER_SECONDS = 45
+DIRECT_RECONCILE_COOLDOWN_SECONDS = 60
+DIRECT_RECONCILE_MAX_ATTEMPTS = 3
+
+
+def _aware_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 def _extract_callback_metadata(stk_callback: dict) -> dict:
     items = stk_callback.get("CallbackMetadata", {}).get("Item", [])
@@ -48,6 +60,129 @@ def _backfill_completed_receipt(txn: Transaction, stk_callback: dict, payload: d
 
     if changed:
         db.commit()
+
+
+def _payment_status_response(
+    checkout_request_id: str,
+    txn: Transaction,
+    db: Session,
+    user_id: int,
+) -> PaymentStatusResponse:
+    tier = txn.tier.value if txn.tier else None
+    if txn.status == TransactionStatus.COMPLETED:
+        scheduled = (
+            db.query(Subscription)
+            .filter_by(
+                user_id=user_id,
+                tier=txn.tier,
+                status=SubscriptionStatus.PENDING,
+            )
+            .first()
+            if txn.tier
+            else None
+        )
+        if scheduled:
+            starts_at = scheduled.started_at
+            starts_text = starts_at.strftime("%d %b %Y") if starts_at else "after your current plan ends"
+            return PaymentStatusResponse(
+                checkout_request_id=checkout_request_id,
+                status=txn.status.value,
+                tier=tier,
+                receipt_number=txn.mpesa_receipt_number,
+                message=f"Payment confirmed. Your {tier.upper()} subscription starts on {starts_text}.",
+            )
+
+        return PaymentStatusResponse(
+            checkout_request_id=checkout_request_id,
+            status=txn.status.value,
+            tier=tier,
+            receipt_number=txn.mpesa_receipt_number,
+            message=f"Payment confirmed. Your {tier.upper() if tier else 'paid'} subscription is active.",
+        )
+
+    if txn.status in {TransactionStatus.FAILED, TransactionStatus.CANCELLED}:
+        return PaymentStatusResponse(
+            checkout_request_id=checkout_request_id,
+            status=txn.status.value,
+            tier=tier,
+            failure_reason=txn.failure_reason,
+            message=txn.failure_reason or "Payment was not completed.",
+        )
+
+    return PaymentStatusResponse(
+        checkout_request_id=checkout_request_id,
+        status=txn.status.value,
+        tier=tier,
+        message="Waiting for M-Pesa confirmation.",
+    )
+
+
+def _should_direct_reconcile(txn: Transaction, now: datetime) -> tuple[bool, str | None]:
+    if txn.status != TransactionStatus.PENDING:
+        return False, "not_pending"
+
+    attempts = getattr(txn, "reconcile_attempts", 0) or 0
+    if attempts >= DIRECT_RECONCILE_MAX_ATTEMPTS:
+        return False, "max_attempts"
+
+    initiated_at = _aware_utc(getattr(txn, "initiated_at", None))
+    if initiated_at and now - initiated_at < timedelta(seconds=DIRECT_RECONCILE_AFTER_SECONDS):
+        return False, "too_new"
+
+    last_reconciled_at = _aware_utc(getattr(txn, "last_reconciled_at", None))
+    if last_reconciled_at and now - last_reconciled_at < timedelta(seconds=DIRECT_RECONCILE_COOLDOWN_SECONDS):
+        return False, "cooldown"
+
+    return True, None
+
+
+def _record_direct_reconcile_attempt(txn: Transaction, db: Session, now: datetime) -> None:
+    txn.reconcile_attempts = (getattr(txn, "reconcile_attempts", 0) or 0) + 1
+    txn.last_reconciled_at = now
+    db.commit()
+
+
+def _apply_direct_reconcile_result(txn: Transaction, result: dict, db: Session) -> bool:
+    result_code = str(result.get("ResultCode", ""))
+    result_desc = result.get("ResultDesc", "Unknown")
+
+    txn.raw_callback = result
+    txn.mpesa_response_code = result_code
+    txn.mpesa_response_description = result_desc
+
+    if not result_code:
+        db.commit()
+        return False
+
+    if result_code == "0":
+        txn.status = TransactionStatus.COMPLETED
+        txn.completed_at = datetime.now(timezone.utc)
+        txn.failure_reason = None
+        txn.mpesa_receipt_number = (
+            result.get("MpesaReceiptNumber")
+            or result.get("ReceiptNumber")
+            or txn.mpesa_receipt_number
+        )
+        db.commit()
+        SubscriptionService(db).activate(txn.user_id, txn.tier.value, amount_paid=txn.amount)
+        return True
+
+    if result_code == "1032":
+        txn.status = TransactionStatus.CANCELLED
+        txn.failure_reason = "Request cancelled by user"
+    elif result_code in ("1037", "1001"):
+        reason_map = {
+            "1037": "Payment timed out. Please try again.",
+            "1001": "Insufficient M-Pesa balance.",
+        }
+        txn.status = TransactionStatus.FAILED
+        txn.failure_reason = reason_map.get(result_code, result_desc)
+    else:
+        txn.status = TransactionStatus.FAILED
+        txn.failure_reason = result_desc
+
+    db.commit()
+    return True
 
 
 @router.get("/plans")
@@ -194,7 +329,7 @@ async def initiate_payment(
 
 
 @router.get("/status/{checkout_request_id}", response_model=PaymentStatusResponse)
-def get_payment_status(
+async def get_payment_status(
     checkout_request_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -207,53 +342,60 @@ def get_payment_status(
     if not txn:
         raise HTTPException(404, "Payment request not found.")
 
-    tier = txn.tier.value if txn.tier else None
-    if txn.status == TransactionStatus.COMPLETED:
-        scheduled = (
-            db.query(Subscription)
-            .filter_by(
+    now = datetime.now(timezone.utc)
+    should_reconcile, skipped_reason = _should_direct_reconcile(txn, now)
+    if should_reconcile:
+        _record_direct_reconcile_attempt(txn, db, now)
+        log_event(
+            logger,
+            logging.INFO,
+            "payment.status_reconcile.started",
+            transaction_id=txn.id,
+            user_id=current_user.id,
+            checkout_request_id=checkout_request_id,
+            attempt=txn.reconcile_attempts,
+        )
+        try:
+            result = await mpesa.query_stk_status(checkout_request_id)
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                "payment.status_reconcile.provider_error",
+                transaction_id=txn.id,
                 user_id=current_user.id,
-                tier=txn.tier,
-                status=SubscriptionStatus.PENDING,
-            )
-            .first()
-            if txn.tier
-            else None
-        )
-        if scheduled:
-            starts_at = scheduled.started_at
-            starts_text = starts_at.strftime("%d %b %Y") if starts_at else "after your current plan ends"
-            return PaymentStatusResponse(
                 checkout_request_id=checkout_request_id,
-                status=txn.status.value,
-                tier=tier,
-                receipt_number=txn.mpesa_receipt_number,
-                message=f"Payment confirmed. Your {tier.upper()} subscription starts on {starts_text}.",
+                attempt=txn.reconcile_attempts,
+                error_type=type(exc).__name__,
+                error=str(exc),
             )
-
-        return PaymentStatusResponse(
+        else:
+            changed = _apply_direct_reconcile_result(txn, result, db)
+            log_event(
+                logger,
+                logging.INFO,
+                "payment.status_reconcile.completed",
+                transaction_id=txn.id,
+                user_id=current_user.id,
+                checkout_request_id=checkout_request_id,
+                attempt=txn.reconcile_attempts,
+                result_code=result.get("ResultCode"),
+                transaction_status=txn.status,
+                changed=changed,
+            )
+    elif txn.status == TransactionStatus.PENDING:
+        log_event(
+            logger,
+            logging.DEBUG,
+            "payment.status_reconcile.skipped",
+            transaction_id=txn.id,
+            user_id=current_user.id,
             checkout_request_id=checkout_request_id,
-            status=txn.status.value,
-            tier=tier,
-            receipt_number=txn.mpesa_receipt_number,
-            message=f"Payment confirmed. Your {tier.upper() if tier else 'paid'} subscription is active.",
+            reason=skipped_reason,
+            attempts=getattr(txn, "reconcile_attempts", 0) or 0,
         )
 
-    if txn.status in {TransactionStatus.FAILED, TransactionStatus.CANCELLED}:
-        return PaymentStatusResponse(
-            checkout_request_id=checkout_request_id,
-            status=txn.status.value,
-            tier=tier,
-            failure_reason=txn.failure_reason,
-            message=txn.failure_reason or "Payment was not completed.",
-        )
-
-    return PaymentStatusResponse(
-        checkout_request_id=checkout_request_id,
-        status=txn.status.value,
-        tier=tier,
-        message="Waiting for M-Pesa confirmation.",
-    )
+    return _payment_status_response(checkout_request_id, txn, db, current_user.id)
 
 
 @router.post("/mpesa-callback")

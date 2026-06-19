@@ -46,6 +46,11 @@ class Transaction(Base):
     # Raw M-Pesa callback stored as JSON — always keep the raw response
     raw_callback = Column(JSONB, nullable=True)
 
+    # Direct fallback reconciliation tracking. This prevents user-driven status
+    # polling from repeatedly querying M-Pesa when Celery workers are not running.
+    reconcile_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    last_reconciled_at = Column(DateTime(timezone=True), nullable=True)
+
     # Timestamps
     initiated_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
