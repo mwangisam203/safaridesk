@@ -26,11 +26,17 @@ from app.services.auth_service import (
 )
 from app.services.email_service import send_test_email
 from app.core.dependencies import get_current_user
+from app.core.rate_limit import rate_limit
 from app.models.user import User
 
 router = APIRouter()
 
-@router.post("/register", response_model=UserResponse, status_code=201)
+@router.post(
+    "/register",
+    response_model=UserResponse,
+    status_code=201,
+    dependencies=[Depends(rate_limit("auth:register", limit=5, window_seconds=3600))],
+)
 def register(
     request: RegisterRequest,
     background_tasks: BackgroundTasks,
@@ -41,12 +47,20 @@ def register(
     background_tasks.add_task(send_verification_for_user, user.id)
     return user
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    dependencies=[Depends(rate_limit("auth:login", limit=10, window_seconds=300))],
+)
 def login(request: LoginRequest, db: Session = Depends(get_db)):
     """Login with email and password. Returns JWT tokens."""
     return login_user(request, db)
 
-@router.post("/token", response_model=TokenResponse)
+@router.post(
+    "/token",
+    response_model=TokenResponse,
+    dependencies=[Depends(rate_limit("auth:token", limit=10, window_seconds=300))],
+)
 def token(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
@@ -83,7 +97,11 @@ def verify_email(token: str, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/resend-verification", response_model=VerificationResponse)
+@router.post(
+    "/resend-verification",
+    response_model=VerificationResponse,
+    dependencies=[Depends(rate_limit("auth:resend-verification", limit=6, window_seconds=900))],
+)
 def resend_verification(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
@@ -100,7 +118,11 @@ def resend_verification(
     )
 
 
-@router.post("/resend-verification-email", response_model=VerificationResponse)
+@router.post(
+    "/resend-verification-email",
+    response_model=VerificationResponse,
+    dependencies=[Depends(rate_limit("auth:resend-verification-email", limit=6, window_seconds=900))],
+)
 def resend_verification_email(
     request: EmailRequest,
     background_tasks: BackgroundTasks,
@@ -115,7 +137,10 @@ def resend_verification_email(
     )
 
 
-@router.post("/forgot-password")
+@router.post(
+    "/forgot-password",
+    dependencies=[Depends(rate_limit("auth:forgot-password", limit=5, window_seconds=900))],
+)
 def forgot_password(
     request: EmailRequest,
     background_tasks: BackgroundTasks,

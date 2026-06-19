@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     EMAIL_VERIFICATION_EXPIRE_HOURS: int = 24
     PASSWORD_RESET_EXPIRE_HOURS: int = 1
     AUTH_EMAIL_DELIVERY_MODE: str = "direct"  # direct or celery
+    RATE_LIMIT_ENABLED: bool = True
 
     # Database
     DATABASE_URL: str

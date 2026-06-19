@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.core.dependencies import get_current_user, require_verified_user
+from app.core.rate_limit import rate_limit
 from app.core.security import decode_token
 from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTierInfo
 from app.models.user import User
@@ -94,7 +95,11 @@ def list_subscription_plans(
     }
 
 
-@router.post("/stk-push", response_model=STKPushResponse)
+@router.post(
+    "/stk-push",
+    response_model=STKPushResponse,
+    dependencies=[Depends(rate_limit("payments:stk-push", limit=5, window_seconds=600))],
+)
 async def initiate_payment(
     body: STKPushRequest,
     current_user: User = Depends(require_verified_user),
