@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">SafariDesk</title>
+  <rect width="64" height="64" rx="14" fill="#15803d"/>
+  <path d="M18 17.5c0-2 1.6-3.5 3.5-3.5h9.2c3.5 0 6.5 1.1 8.8 3.2 2.3-2.1 5.3-3.2 8.8-3.2h3.2c2 0 3.5 1.6 3.5 3.5v28c0 2-1.6 3.5-3.5 3.5h-3.2c-3.1 0-5.5.8-7.2 2.5-.9.9-2.4.9-3.3 0C36 49.8 33.6 49 30.5 49h-9c-2 0-3.5-1.6-3.5-3.5v-28Z" fill="#f8faf7"/>
+  <path d="M24 21h6.7c2.5 0 4.5.7 5.9 2v21.7c-1.8-.9-3.8-1.3-6.1-1.3H24V21Zm16.9 2c1.4-1.3 3.4-2 5.9-2H49v22.4h-2.2c-2.3 0-4.3.4-5.9 1.3V23Z" fill="#15803d"/>
+  <path d="M27.2 27.1h5.7M27.2 32.3h5.7M44 27.1h2.1M44 32.3h2.1" stroke="#f8faf7" stroke-width="2.3" stroke-linecap="round"/>
+</svg>
