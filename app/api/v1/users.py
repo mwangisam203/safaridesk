@@ -1,15 +1,85 @@
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.core.dependencies import get_current_user, require_admin
-from app.models.subscription import Subscription, SubscriptionStatus
+from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTierInfo
 from app.models.user import User, SubscriptionTier
 from app.schemas.user import AdminUserUpdate, SubscriptionStatusResponse, UserResponse
 
 router = APIRouter(prefix="/users", tags=["Users"])
 GRACE_PERIOD_DAYS = 3
+ADMIN_OVERRIDE_DAYS = 30
+
+
+def _query_all(query):
+    if hasattr(query, "all"):
+        return query.all()
+    row = query.first()
+    return [row] if row else []
+
+
+def _sync_admin_subscription_override(
+    db: Session,
+    user: User,
+    tier: SubscriptionTier,
+) -> None:
+    now = datetime.now(timezone.utc)
+    subscriptions = _query_all(db.query(Subscription).filter_by(user_id=user.id))
+
+    if tier == SubscriptionTier.FREE:
+        for sub in subscriptions:
+            if sub.status in {
+                SubscriptionStatus.ACTIVE,
+                SubscriptionStatus.GRACE_PERIOD,
+                SubscriptionStatus.PENDING,
+            }:
+                sub.status = SubscriptionStatus.EXPIRED
+                sub.expires_at = now
+        user.subscription_tier = SubscriptionTier.FREE
+        return
+
+    target_tier = SubscriptionTierInfo(tier.value)
+    active_sub = next(
+        (
+            sub
+            for sub in subscriptions
+            if sub.status in {
+                SubscriptionStatus.ACTIVE,
+                SubscriptionStatus.GRACE_PERIOD,
+                SubscriptionStatus.PENDING,
+            }
+        ),
+        None,
+    )
+
+    for sub in subscriptions:
+        if sub is not active_sub and sub.status in {
+            SubscriptionStatus.ACTIVE,
+            SubscriptionStatus.GRACE_PERIOD,
+            SubscriptionStatus.PENDING,
+        }:
+            sub.status = SubscriptionStatus.EXPIRED
+
+    if active_sub:
+        active_sub.tier = target_tier
+        active_sub.status = SubscriptionStatus.ACTIVE
+        active_sub.started_at = now
+        active_sub.expires_at = now + timedelta(days=ADMIN_OVERRIDE_DAYS)
+    else:
+        db.add(
+            Subscription(
+                user_id=user.id,
+                tier=target_tier,
+                status=SubscriptionStatus.ACTIVE,
+                started_at=now,
+                expires_at=now + timedelta(days=ADMIN_OVERRIDE_DAYS),
+            )
+        )
+
+    user.subscription_tier = tier
 
 
 @router.get("/me/subscription", response_model=SubscriptionStatusResponse)
@@ -75,10 +145,35 @@ def get_my_subscription(
 
 @router.get("/admin/users", response_model=list[UserResponse])
 def list_users_for_admin(
+    q: str | None = Query(default=None, max_length=120),
+    tier: SubscriptionTier | None = None,
+    is_active: bool | None = None,
+    is_verified: bool | None = None,
+    is_admin: bool | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    return db.query(User).order_by(User.created_at.desc(), User.id.desc()).all()
+    query = db.query(User)
+
+    if q:
+        pattern = f"%{q.strip()}%"
+        query = query.filter(
+            or_(
+                User.email.ilike(pattern),
+                User.full_name.ilike(pattern),
+                User.phone_number.ilike(pattern),
+            )
+        )
+    if tier is not None:
+        query = query.filter(User.subscription_tier == tier)
+    if is_active is not None:
+        query = query.filter(User.is_active == is_active)
+    if is_verified is not None:
+        query = query.filter(User.is_verified == is_verified)
+    if is_admin is not None:
+        query = query.filter(User.is_admin == is_admin)
+
+    return query.order_by(User.created_at.desc(), User.id.desc()).all()
 
 
 @router.patch("/admin/users/{user_id}", response_model=UserResponse)
@@ -102,8 +197,13 @@ def update_user_for_admin(
             detail="You cannot remove your own admin access.",
         )
 
+    subscription_tier = updates.pop("subscription_tier", None)
+
     for field, value in updates.items():
         setattr(user, field, value)
+
+    if subscription_tier is not None:
+        _sync_admin_subscription_override(db, user, subscription_tier)
 
     db.commit()
     db.refresh(user)

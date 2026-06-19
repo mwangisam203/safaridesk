@@ -15,6 +15,7 @@ from app.core.config import settings
 from jose import jwt
 from app.api.v1 import auth as auth_api
 from app.db import session
+from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTierInfo
 from app.models.user import SubscriptionTier, User
 from app.services import auth_service
 from main import app
@@ -27,6 +28,10 @@ class FakeQuery:
 
     def filter(self, *criteria):
         self.criteria.extend(criteria)
+        return self
+
+    def filter_by(self, **criteria):
+        self.criteria.extend(criteria.items())
         return self
 
     def first(self):
@@ -45,6 +50,10 @@ class FakeQuery:
         return self
 
     def _matches(self, row, criterion):
+        if isinstance(criterion, tuple):
+            field, value = criterion
+            return getattr(row, field) == value
+
         left = getattr(criterion, "left", None)
         right = getattr(criterion, "right", None)
         field = getattr(left, "key", None)
@@ -57,8 +66,9 @@ class FakeQuery:
 
 
 class FakeDb:
-    def __init__(self, users=None):
+    def __init__(self, users=None, subscriptions=None):
         self.users = users or []
+        self.subscriptions = subscriptions or []
         self.added = []
         self.commits = 0
         self.refreshed = []
@@ -67,6 +77,8 @@ class FakeDb:
         self.added.append(row)
         if isinstance(row, User):
             self.users.append(row)
+        if isinstance(row, Subscription):
+            self.subscriptions.append(row)
 
     def commit(self):
         self.commits += 1
@@ -89,6 +101,8 @@ class FakeDb:
     def query(self, model):
         if model is User:
             return FakeQuery(self.users)
+        if model is Subscription:
+            return FakeQuery(self.subscriptions)
         return FakeQuery([])
 
     def get(self, model, row_id):
@@ -553,6 +567,35 @@ def test_admin_can_update_user_flags():
     assert response.json()["is_verified"] is True
     assert response.json()["is_active"] is False
     assert response.json()["subscription_tier"] == "basic"
+    assert fake_db.subscriptions[0].user_id == user.id
+    assert fake_db.subscriptions[0].tier == SubscriptionTierInfo.BASIC
+    assert fake_db.subscriptions[0].status == SubscriptionStatus.ACTIVE
+    assert fake_db.commits == 1
+
+
+def test_admin_can_expire_subscription_by_setting_free_tier():
+    admin = make_user(user_id=1, email="admin@example.com", is_verified=True, is_admin=True)
+    user = make_user(user_id=2, email="reader@example.com", is_verified=True)
+    user.subscription_tier = SubscriptionTier.PRO
+    subscription = Subscription(
+        id=8,
+        user_id=user.id,
+        tier=SubscriptionTierInfo.PRO,
+        status=SubscriptionStatus.ACTIVE,
+        started_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc),
+    )
+    fake_db = FakeDb(users=[admin, user], subscriptions=[subscription])
+    app.dependency_overrides[dependencies.require_admin] = lambda: admin
+
+    response = make_client(fake_db).patch(
+        f"/api/v1/users/admin/users/{user.id}",
+        json={"subscription_tier": "free"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["subscription_tier"] == "free"
+    assert subscription.status == SubscriptionStatus.EXPIRED
     assert fake_db.commits == 1
 
 
