@@ -8,6 +8,7 @@ import { AdminUsersPage } from "./pages/AdminUsersPage";
 import { AccountPage } from "./pages/AccountPage";
 import { ArticlePage } from "./pages/ArticlePage";
 import { ForgotPasswordPage, ResendVerificationPage } from "./pages/ForgotPasswordPage";
+import { ContactPage, PrivacyPage, TermsPage } from "./pages/LegalPages";
 import { LibraryPage } from "./pages/LibraryPage";
 import { PlansPage } from "./pages/PlansPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
@@ -25,6 +26,9 @@ export default function App() {
         <Route path="/resend-verification" element={<ResendVerificationPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/contact" element={<ContactPage />} />
         <Route
           path="/admin/articles"
           element={<AdminRoute><AdminArticlesPage /></AdminRoute>}
