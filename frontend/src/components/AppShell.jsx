@@ -157,9 +157,13 @@ export function AppShell({ children }) {
       <main key={location.pathname}>{children}</main>
 
       <footer className="border-t border-neutral-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-7 text-sm text-neutral-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-7 text-sm text-neutral-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
           <p>SafariDesk. Practical backend knowledge, built in Nairobi.</p>
-          <p>FastAPI · PostgreSQL · Payments · Production</p>
+          <nav className="flex flex-wrap gap-x-4 gap-y-2">
+            <FooterLink to="/terms">Terms</FooterLink>
+            <FooterLink to="/privacy">Privacy</FooterLink>
+            <FooterLink to="/contact">Contact</FooterLink>
+          </nav>
         </div>
       </footer>
 
@@ -191,6 +195,14 @@ function NavItem({ to, children }) {
 function MobileLink({ to, onClick, children }) {
   return (
     <Link to={to} onClick={onClick} className="rounded-md px-3 py-2.5 font-semibold text-ink hover:bg-white">
+      {children}
+    </Link>
+  );
+}
+
+function FooterLink({ to, children }) {
+  return (
+    <Link to={to} className="font-semibold hover:text-ink">
       {children}
     </Link>
   );
