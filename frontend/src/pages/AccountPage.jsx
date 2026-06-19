@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   CalendarDays,
   CheckCircle2,
+  Eye,
+  EyeOff,
   LoaderCircle,
   MailCheck,
   KeyRound,
@@ -196,18 +198,31 @@ export function AccountPage() {
 }
 
 function PasswordInput({ label, value, onChange }) {
+  const [visible, setVisible] = useState(false);
+
   return (
     <label className="block text-sm font-semibold text-neutral-700">
       {label}
-      <input
-        type="password"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        minLength={8}
-        maxLength={72}
-        required
-        className="mt-2 h-11 w-full rounded-md border border-neutral-300 px-3 outline-none focus:border-green-500"
-      />
+      <span className="relative mt-2 block">
+        <input
+          type={visible ? "text" : "password"}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          minLength={8}
+          maxLength={72}
+          required
+          className="h-11 w-full rounded-md border border-neutral-300 px-3 pr-11 outline-none focus:border-green-500"
+        />
+        <button
+          type="button"
+          onClick={() => setVisible((current) => !current)}
+          className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-ink"
+          aria-label={visible ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+          title={visible ? "Hide password" : "Show password"}
+        >
+          {visible ? <EyeOff size={17} /> : <Eye size={17} />}
+        </button>
+      </span>
     </label>
   );
 }
