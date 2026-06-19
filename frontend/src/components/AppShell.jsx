@@ -3,6 +3,7 @@ import { BookOpen, CircleUserRound, FilePenLine, Menu, Search, X } from "lucide-
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { AuthDialog } from "./AuthDialog";
+import { NotificationBell } from "./NotificationBell";
 import { TierBadge } from "./TierBadge";
 
 export function AppShell({ children }) {
@@ -62,6 +63,7 @@ export function AppShell({ children }) {
           <div className="hidden items-center gap-2 md:flex">
             {user ? (
               <>
+                <NotificationBell />
                 <Link
                   to="/account"
                   className="flex h-10 items-center gap-2 rounded-md border border-neutral-300 bg-white px-3 text-sm font-semibold text-ink"
@@ -136,9 +138,12 @@ export function AppShell({ children }) {
             </nav>
             <div className="mt-4 grid grid-cols-2 gap-2">
               {user ? (
-                <button type="button" onClick={logout} className="col-span-2 h-11 rounded-md border border-neutral-300 bg-white font-semibold">
-                  Sign out
-                </button>
+                <>
+                  <NotificationBell compact />
+                  <button type="button" onClick={logout} className="h-11 rounded-md border border-neutral-300 bg-white font-semibold">
+                    Sign out
+                  </button>
+                </>
               ) : (
                 <>
                   <button type="button" onClick={() => openAuth("login")} className="h-11 rounded-md border border-neutral-300 bg-white font-semibold">
