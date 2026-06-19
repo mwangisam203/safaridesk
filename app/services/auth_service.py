@@ -13,7 +13,7 @@ from app.core.security import (
     verify_password,
 )
 from app.models.user import User
-from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
+from app.schemas.auth import ChangePasswordRequest, RegisterRequest, LoginRequest, TokenResponse
 from app.tasks.email_tasks import (
     send_password_reset_email,
     send_password_reset_email_now,
@@ -241,4 +241,25 @@ def reset_user_password(token: str, password: str, db: Session) -> None:
         raise invalid_token
 
     user.hashed_password = hash_password(password)
+    db.commit()
+
+
+def change_user_password(
+    user: User,
+    request: ChangePasswordRequest,
+    db: Session,
+) -> None:
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated",
+        )
+
+    if not verify_password(request.current_password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect.",
+        )
+
+    user.hashed_password = hash_password(request.new_password)
     db.commit()

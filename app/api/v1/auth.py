@@ -5,6 +5,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.auth import (
+    ChangePasswordRequest,
     EmailRequest,
     LoginRequest,
     PasswordResetRequest,
@@ -15,6 +16,7 @@ from app.schemas.auth import (
 )
 from app.schemas.user import UserResponse
 from app.services.auth_service import (
+    change_user_password,
     login_user,
     login_user_by_email,
     get_password_reset_recipient,
@@ -271,6 +273,36 @@ def forgot_password(
 def reset_password(request: PasswordResetRequest, db: Session = Depends(get_db)):
     reset_user_password(request.token, request.password, db)
     return {"message": "Password reset successfully. You can now sign in."}
+
+
+@router.post("/change-password")
+def change_password(
+    request: ChangePasswordRequest,
+    http_request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        change_user_password(current_user, request, db)
+    except HTTPException as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            "auth.password_change.failed",
+            user_id=current_user.id,
+            status_code=exc.status_code,
+            client_ip=client_ip(http_request),
+        )
+        raise
+
+    log_event(
+        logger,
+        logging.INFO,
+        "auth.password_change.succeeded",
+        user_id=current_user.id,
+        client_ip=client_ip(http_request),
+    )
+    return {"message": "Password changed successfully. Please sign in again."}
 
 
 @router.post("/test-email")
