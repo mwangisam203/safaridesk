@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   LoaderCircle,
   MailCheck,
+  KeyRound,
   Shield,
   UserRound
 } from "lucide-react";
@@ -15,10 +16,17 @@ import { api } from "../lib/api";
 import { formatDate } from "../lib/content";
 
 export function AccountPage() {
-  const { user, subscription, loading } = useAuth();
+  const { user, subscription, loading, logout } = useAuth();
   const [verificationMessage, setVerificationMessage] = useState("");
   const [verificationRequested, setVerificationRequested] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [passwordForm, setPasswordForm] = useState({
+    current_password: "",
+    new_password: "",
+    confirm_password: ""
+  });
 
   if (loading) return <div className="grid min-h-[70vh] place-items-center"><LoaderCircle className="animate-spin text-green-600" /></div>;
   if (!user) return <Navigate to="/" replace />;
@@ -34,6 +42,34 @@ export function AccountPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function changePassword(event) {
+    event.preventDefault();
+    setPasswordMessage("");
+
+    if (passwordForm.new_password !== passwordForm.confirm_password) {
+      setPasswordMessage("New password and confirmation must match.");
+      return;
+    }
+
+    setPasswordBusy(true);
+    try {
+      await api("/api/v1/auth/change-password", {
+        method: "POST",
+        body: JSON.stringify(passwordForm)
+      });
+      setPasswordMessage("Password changed. Please sign in again.");
+      window.setTimeout(logout, 900);
+    } catch (error) {
+      setPasswordMessage(error.message);
+    } finally {
+      setPasswordBusy(false);
+    }
+  }
+
+  function setPasswordField(field, value) {
+    setPasswordForm((current) => ({ ...current, [field]: value }));
   }
 
   const statusTone = subscription?.status === "grace_period"
@@ -109,7 +145,70 @@ export function AccountPage() {
           </div>
         </article>
       </div>
+
+      <article className="mt-5 rounded-lg border border-neutral-200 bg-white p-6 shadow-soft sm:p-7">
+        <div className="flex items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-green-50 text-green-700">
+            <KeyRound size={20} />
+          </span>
+          <div>
+            <p className="text-xs font-semibold uppercase text-neutral-500">Security</p>
+            <h2 className="mt-1 font-display text-2xl font-semibold text-ink">Change password</h2>
+            <p className="mt-2 text-sm leading-6 text-neutral-500">
+              You will be signed out after changing your password.
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={changePassword} className="mt-6 grid gap-4 md:grid-cols-3">
+          <PasswordInput
+            label="Current password"
+            value={passwordForm.current_password}
+            onChange={(value) => setPasswordField("current_password", value)}
+          />
+          <PasswordInput
+            label="New password"
+            value={passwordForm.new_password}
+            onChange={(value) => setPasswordField("new_password", value)}
+          />
+          <PasswordInput
+            label="Confirm new password"
+            value={passwordForm.confirm_password}
+            onChange={(value) => setPasswordField("confirm_password", value)}
+          />
+          <div className="md:col-span-3">
+            <button
+              type="submit"
+              disabled={passwordBusy}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-ink px-5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-60"
+            >
+              {passwordBusy && <LoaderCircle size={16} className="animate-spin" />}
+              Change password
+            </button>
+            {passwordMessage && (
+              <p className="mt-3 text-sm font-semibold text-neutral-700">{passwordMessage}</p>
+            )}
+          </div>
+        </form>
+      </article>
     </section>
+  );
+}
+
+function PasswordInput({ label, value, onChange }) {
+  return (
+    <label className="block text-sm font-semibold text-neutral-700">
+      {label}
+      <input
+        type="password"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        minLength={8}
+        maxLength={72}
+        required
+        className="mt-2 h-11 w-full rounded-md border border-neutral-300 px-3 outline-none focus:border-green-500"
+      />
+    </label>
   );
 }
 
