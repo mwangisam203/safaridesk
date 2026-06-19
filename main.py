@@ -1,10 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from app.core.observability import configure_logging
 from app.api.v1 import auth  # import more routers as you build them
 from app.api.v1.payments import router as payments_router
 from app.api.v1.content import router as content_router
 from app.api.v1.users import router as users_router
+
+configure_logging()
 
 app = FastAPI(
     title=settings.APP_NAME,
