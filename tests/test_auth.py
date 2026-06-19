@@ -11,6 +11,7 @@ from app.core.security import (
     decode_token,
     hash_password,
 )
+from app.core.rate_limit import reset_rate_limits
 from app.core.config import settings
 from jose import jwt
 from app.api.v1 import auth as auth_api
@@ -148,7 +149,12 @@ def make_client(fake_db):
 
 
 def teardown_function():
+    reset_rate_limits()
     app.dependency_overrides.clear()
+
+
+def setup_function():
+    reset_rate_limits()
 
 
 def test_register_creates_user_and_queues_verification_email(monkeypatch):
@@ -213,6 +219,38 @@ def test_register_rejects_duplicate_phone_number():
     assert response.status_code == 400
     assert response.json()["detail"] == "Phone number already registered"
     assert fake_db.commits == 0
+
+
+def test_register_rate_limit_returns_retry_after(monkeypatch):
+    fake_db = FakeDb()
+    monkeypatch.setattr(auth_api, "send_verification_for_user", lambda user_id: None)
+    client = make_client(fake_db)
+
+    for index in range(5):
+        response = client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": f"new{index}@example.com",
+                "phone_number": f"07123456{index:02d}",
+                "full_name": "New User",
+                "password": "strongpass123",
+            },
+        )
+        assert response.status_code == 201
+
+    blocked = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "blocked@example.com",
+            "phone_number": "0712345699",
+            "full_name": "Blocked User",
+            "password": "strongpass123",
+        },
+    )
+
+    assert blocked.status_code == 429
+    assert blocked.json()["detail"] == "Too many requests. Please try again shortly."
+    assert "retry-after" in blocked.headers
 
 
 def test_login_returns_tokens_for_valid_credentials():

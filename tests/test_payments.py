@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.api.v1 import payments
 from app.core import dependencies
+from app.core.rate_limit import reset_rate_limits
 from app.db import session
 from app.tasks import reconciler_task
 from app.models.subscription import SubscriptionTierInfo
@@ -73,7 +74,12 @@ def make_client(fake_db):
 
 
 def teardown_function():
+    reset_rate_limits()
     app.dependency_overrides.clear()
+
+
+def setup_function():
+    reset_rate_limits()
 
 
 def test_lists_subscription_plans():
