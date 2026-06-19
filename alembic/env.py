@@ -8,6 +8,7 @@ from alembic import context
 from app.models.user import User
 from app.models.subscription import Subscription
 from app.models.transaction import Transaction
+from app.models.notification import Notification
 from app.models.audit_log import AuditLog
 from app.models.article import Article
 from app.models.free_article_read import FreeArticleRead

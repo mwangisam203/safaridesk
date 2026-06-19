@@ -6,6 +6,7 @@ from app.api.v1 import auth  # import more routers as you build them
 from app.api.v1.payments import router as payments_router
 from app.api.v1.content import router as content_router
 from app.api.v1.users import router as users_router
+from app.api.v1.notifications import router as notifications_router
 
 configure_logging()
 
@@ -32,6 +33,7 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(payments_router, prefix="/api/v1")
 app.include_router(content_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
+app.include_router(notifications_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
