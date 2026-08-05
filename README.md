@@ -231,6 +231,15 @@ Do not paste passwords, Neon URLs, AWS keys, M-Pesa credentials, SMS keys, or
 mail passwords into `render.yaml`. That file is committed to GitHub. Values
 marked with `sync: false` must be entered in the Render dashboard.
 
+Daraja does not sign or otherwise authenticate its STK Push callback requests.
+`MPESA_CALLBACK_SECRET` is what stops anyone who learns a `CheckoutRequestID`
+(returned to the user themselves from `/stk-push`) from POSTing a forged
+"payment succeeded" body to `mpesa-callback` and getting a subscription
+activated without paying. Set it to a long random value and append it as a
+`secret` query parameter on `MPESA_CALLBACK_URL`. Leaving it unset disables the
+check — fine for quick local experiments, not for anything reachable from the
+internet.
+
 The deployed backend exposes the same API surface as local development:
 
 - `GET /health`
@@ -257,7 +266,8 @@ FRONTEND_URL=https://your-frontend-domain.com
 DATABASE_URL=...
 REDIS_URL=...
 AUTH_EMAIL_DELIVERY_MODE=direct
-MPESA_CALLBACK_URL=https://safaridesk-api.onrender.com/api/v1/payments/mpesa-callback
+MPESA_CALLBACK_SECRET=...
+MPESA_CALLBACK_URL=https://safaridesk-api.onrender.com/api/v1/payments/mpesa-callback?secret=...
 MAIL_USERNAME=...
 MAIL_PASSWORD=...
 AT_API_KEY=...
@@ -609,6 +619,7 @@ Common local/development values:
 - `MPESA_BUSINESS_SHORT_CODE`
 - `MPESA_PASSKEY`
 - `MPESA_CALLBACK_URL`
+- `MPESA_CALLBACK_SECRET`
 - `MPESA_ENVIRONMENT`
 - `MAIL_USERNAME`
 - `MAIL_PASSWORD`
