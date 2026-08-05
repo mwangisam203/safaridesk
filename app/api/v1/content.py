@@ -31,6 +31,7 @@ from app.schemas.article import (
     ArticleDetail,
 )
 from app.services.image_storage import ImageUploadError, store_article_image
+from app.services.subscription_service import SubscriptionService
 
 router = APIRouter(prefix="/content", tags=["Content"])
 logger = logging.getLogger(__name__)
@@ -184,12 +185,8 @@ def list_articles(
             user_id = int(payload.get("sub"))
             user = db.get(User, user_id)
             if user and (
-                user.subscription_tier == SubscriptionTier.PRO
-                or (
-                    user.is_admin
-                    and user.is_verified
-                    and user.is_active
-                )
+                (user.is_admin and user.is_verified and user.is_active)
+                or SubscriptionService(db).effective_tier(user) == SubscriptionTier.PRO
             ):
                 return (
                     db.query(Article)
@@ -236,12 +233,8 @@ def search_articles(
             user_id = int(payload.get("sub"))
             user = db.get(User, user_id)
             if user and (
-                user.subscription_tier == SubscriptionTier.PRO
-                or (
-                    user.is_admin
-                    and user.is_verified
-                    and user.is_active
-                )
+                (user.is_admin and user.is_verified and user.is_active)
+                or SubscriptionService(db).effective_tier(user) == SubscriptionTier.PRO
             ):
                 show_pro = True
         except Exception:
@@ -309,10 +302,16 @@ def get_article(
             db.refresh(article)
             return article
 
+        # Checked against the real Subscription record (active or within the
+        # 3-day grace window) rather than the denormalized
+        # user.subscription_tier column, which only gets corrected by the
+        # daily lifecycle task and can otherwise lag behind an actual expiry.
+        effective_tier = SubscriptionService(db).effective_tier(user)
+
         # PRO articles blocked for non-PRO
         if (
             article.tier == ArticleTier.PRO
-            and user.subscription_tier != SubscriptionTier.PRO
+            and effective_tier != SubscriptionTier.PRO
         ):
             raise HTTPException(
                 status_code=403,
@@ -320,7 +319,7 @@ def get_article(
             )
 
         # Subscribers — unlimited access
-        if user.subscription_tier in (SubscriptionTier.BASIC, SubscriptionTier.PRO):
+        if effective_tier in (SubscriptionTier.BASIC, SubscriptionTier.PRO):
             article.view_count += 1
             db.commit()
             db.refresh(article)
