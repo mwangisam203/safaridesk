@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     MPESA_PASSKEY: str = ""
     MPESA_CALLBACK_URL: str = ""
     MPESA_ENVIRONMENT: str = "sandbox"
+    # Daraja does not sign or otherwise authenticate its callback requests, so
+    # this is what stops anyone who can guess/observe the callback path from
+    # forging a "payment succeeded" POST. When set, register
+    # MPESA_CALLBACK_URL with this value as a `secret` query parameter, e.g.
+    # https://api.example.com/api/v1/payments/mpesa-callback?secret=<value>.
+    # Left empty, the check is skipped (matches local/dev behavior today).
+    MPESA_CALLBACK_SECRET: str = ""
 
     # Africa's Talking
     AT_USERNAME: str = "sandbox"
