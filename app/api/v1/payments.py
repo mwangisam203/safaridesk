@@ -1,8 +1,10 @@
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.db.session import get_db
+from app.core.config import settings
 from app.core.dependencies import get_current_user, require_verified_user
 from app.core.observability import client_ip, log_event
 from app.core.rate_limit import rate_limit
@@ -417,7 +419,27 @@ async def get_payment_status(
 async def mpesa_callback(request: Request, db: Session = Depends(get_db)):
     """
     Safaricom posts here. Must always return 200 or they retry.
+
+    Daraja does not sign or otherwise authenticate its callback requests, so
+    without MPESA_CALLBACK_SECRET configured, anyone who learns a
+    CheckoutRequestID (e.g. a user, from their own /stk-push response) could
+    POST a forged "payment succeeded" body here and get a subscription
+    activated without paying. When the secret is set, the callback URL
+    registered with Safaricom must include it as a `secret` query parameter.
     """
+    if settings.MPESA_CALLBACK_SECRET:
+        provided_secret = request.query_params.get("secret", "")
+        if not secrets.compare_digest(provided_secret, settings.MPESA_CALLBACK_SECRET):
+            log_event(
+                logger,
+                logging.WARNING,
+                "payment.callback.secret_mismatch",
+                client_ip=client_ip(request),
+            )
+            # Still 200 — don't give an attacker a way to distinguish "wrong
+            # secret" from "unknown transaction" or reveal we're checking at all.
+            return {"ResultCode": 0, "ResultDesc": "Accepted"}
+
     try:
         payload = await request.json()
         stk_callback = payload["Body"]["stkCallback"]
