@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.v1 import payments
@@ -91,6 +92,14 @@ def teardown_function():
 
 def setup_function():
     reset_rate_limits()
+
+
+@pytest.fixture(autouse=True)
+def _no_callback_secret_by_default(monkeypatch):
+    # Tests shouldn't depend on whatever MPESA_CALLBACK_SECRET happens to be
+    # set to in a developer's local .env. Tests that specifically cover the
+    # secret check set their own value via monkeypatch.
+    monkeypatch.setattr(payments.settings, "MPESA_CALLBACK_SECRET", "")
 
 
 def test_lists_subscription_plans():
@@ -590,6 +599,95 @@ def test_failed_callback_marks_transaction_failed(monkeypatch):
     assert txn.status == TransactionStatus.FAILED
     assert txn.failure_reason == "Request cancelled by user"
     assert failed_task.calls == [(7, "1.00", "Request cancelled by user")]
+
+
+def _forged_success_body(checkout_id: str) -> dict:
+    return {
+        "Body": {
+            "stkCallback": {
+                "CheckoutRequestID": checkout_id,
+                "ResultCode": 0,
+                "ResultDesc": "The service request is processed successfully.",
+                "CallbackMetadata": {
+                    "Item": [{"Name": "MpesaReceiptNumber", "Value": "FORGED123"}]
+                },
+            }
+        }
+    }
+
+
+def test_callback_rejects_wrong_secret_without_activating_subscription(monkeypatch):
+    txn = Transaction(
+        user_id=7,
+        mpesa_request_id="ws_CO_secret_guard",
+        merchant_request_id="merchant_secret_guard",
+        amount=Decimal("5.00"),
+        tier=SubscriptionTierInfo.PRO,
+        transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
+        status=TransactionStatus.PENDING,
+        phone_number="+254712345678",
+    )
+    fake_db = FakeDb([txn])
+    monkeypatch.setattr(payments.settings, "MPESA_CALLBACK_SECRET", "correct-secret")
+
+    activated = []
+    monkeypatch.setattr(
+        payments,
+        "SubscriptionService",
+        lambda db: type("S", (), {"activate": staticmethod(lambda *a, **k: activated.append(a))})(),
+    )
+
+    # No secret at all, and a wrong secret, must both be rejected the same way
+    # a user forging their own CheckoutRequestID would be — without touching
+    # the transaction or activating a subscription.
+    for query_string in ("", "?secret=wrong-secret"):
+        response = make_client(fake_db).post(
+            f"/api/v1/payments/mpesa-callback{query_string}",
+            json=_forged_success_body("ws_CO_secret_guard"),
+        )
+        assert response.status_code == 200
+        assert response.json() == {"ResultCode": 0, "ResultDesc": "Accepted"}
+
+    assert txn.status == TransactionStatus.PENDING
+    assert txn.mpesa_receipt_number is None
+    assert activated == []
+
+
+def test_callback_accepts_correct_secret(monkeypatch):
+    txn = Transaction(
+        user_id=7,
+        mpesa_request_id="ws_CO_secret_ok",
+        merchant_request_id="merchant_secret_ok",
+        amount=Decimal("5.00"),
+        tier=SubscriptionTierInfo.PRO,
+        transaction_type=TransactionType.SUBSCRIPTION_PAYMENT,
+        status=TransactionStatus.PENDING,
+        phone_number="+254712345678",
+    )
+    fake_db = FakeDb([txn])
+    monkeypatch.setattr(payments.settings, "MPESA_CALLBACK_SECRET", "correct-secret")
+
+    activated = []
+
+    class FakeSubscriptionService:
+        def __init__(self, db):
+            self.db = db
+
+        def activate(self, user_id, tier, amount_paid=None):
+            activated.append((user_id, tier))
+
+    monkeypatch.setattr(payments, "SubscriptionService", FakeSubscriptionService)
+    monkeypatch.setattr("app.tasks.email_tasks.send_payment_confirmation", DummyTask())
+    monkeypatch.setattr("app.tasks.sms_tasks.send_payment_confirmation_sms", DummyTask())
+
+    response = make_client(fake_db).post(
+        "/api/v1/payments/mpesa-callback?secret=correct-secret",
+        json=_forged_success_body("ws_CO_secret_ok"),
+    )
+
+    assert response.status_code == 200
+    assert txn.status == TransactionStatus.COMPLETED
+    assert activated == [(7, "pro")]
 
 
 def test_reconciler_skips_already_processed_transaction():
