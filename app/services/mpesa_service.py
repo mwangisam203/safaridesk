@@ -1,10 +1,18 @@
 import base64
 import httpx
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from app.core.config import settings
 
 SANDBOX_BASE = "https://sandbox.safaricom.co.ke"
 PROD_BASE = "https://api.safaricom.co.ke"
+
+# Daraja expects Timestamp/Password to reflect current Nairobi time, not
+# server-local time. datetime.now() alone would be wrong on any host whose
+# system timezone isn't EAT (e.g. most cloud regions), silently producing a
+# Timestamp that drifts from what Safaricom expects and can get requests
+# rejected.
+NAIROBI_TZ = ZoneInfo("Africa/Nairobi")
 
 
 class MpesaService:
@@ -34,7 +42,7 @@ class MpesaService:
         self, phone: str, amount: int, account_ref: str, description: str
     ) -> dict:
         token = await self.get_access_token()
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        timestamp = datetime.now(NAIROBI_TZ).strftime("%Y%m%d%H%M%S")
         password = self._generate_password(timestamp)
 
         # M-Pesa expects 2547XXXXXXXX — strip leading + if present
@@ -77,7 +85,7 @@ class MpesaService:
         Returns Daraja's response dict with ResultCode.
         """
         token = await self.get_access_token()
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        timestamp = datetime.now(NAIROBI_TZ).strftime("%Y%m%d%H%M%S")
         password = self._generate_password(timestamp)
 
         payload = {
