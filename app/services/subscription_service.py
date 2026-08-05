@@ -7,6 +7,7 @@ from app.models.user import User, SubscriptionTier
 TIER_DURATIONS = {"free": 0, "basic": 30, "pro": 30}  # days
 TIER_PRICES = {"basic": Decimal("1"), "pro": Decimal("5")}  # KES
 TIER_RANK = {"free": 0, "basic": 1, "pro": 2}
+GRACE_PERIOD_DAYS = 3
 
 
 def _make_aware(dt: datetime | None) -> datetime | None:
@@ -235,6 +236,47 @@ class SubscriptionService:
 
         self.db.commit()
         return sub
+
+    def effective_tier(self, user: User) -> SubscriptionTier:
+        """
+        The tier a user should actually be granted content access at right
+        now, checked against their real Subscription record.
+
+        `User.subscription_tier` is a denormalized column that's only
+        corrected by the daily subscription-lifecycle Celery task. If that
+        worker/beat process is delayed or not running, a user whose paid
+        period — including the 3-day grace window — has genuinely ended can
+        keep full paid access indefinitely, because nothing re-checks the
+        real expiry at read time. Content routes should call this instead of
+        reading `User.subscription_tier` directly.
+
+        As a side effect, this opportunistically corrects the denormalized
+        column when it's caught stale, instead of waiting for the next
+        lifecycle run.
+        """
+        if user.subscription_tier == SubscriptionTier.FREE:
+            return SubscriptionTier.FREE
+
+        now = datetime.now(timezone.utc)
+        candidates = [
+            sub
+            for sub in self._user_subscriptions(user.id)
+            if sub.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.GRACE_PERIOD}
+            and sub.expires_at is not None
+        ]
+
+        effective = SubscriptionTier.FREE
+        if candidates:
+            current = max(candidates, key=lambda sub: _make_aware(sub.expires_at))
+            grace_ends_at = _make_aware(current.expires_at) + timedelta(days=GRACE_PERIOD_DAYS)
+            if now <= grace_ends_at:
+                effective = SubscriptionTier(current.tier.value)
+
+        if effective != user.subscription_tier:
+            user.subscription_tier = effective
+            self.db.commit()
+
+        return effective
 
     def activate_due_scheduled(self, now: datetime | None = None) -> int:
         now = now or datetime.now(timezone.utc)
