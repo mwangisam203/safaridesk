@@ -18,7 +18,7 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS — controls which domains can call your API
+# CORS 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.FRONTEND_URL.rstrip("/")],
@@ -27,7 +27,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers — add more here as you build each feature
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 
 app.include_router(payments_router, prefix="/api/v1")
