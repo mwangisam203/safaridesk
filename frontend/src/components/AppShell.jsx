@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { BookOpen, CircleUserRound, FilePenLine, Menu, Search, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { BookOpen, CircleUserRound, FilePenLine, Menu, Moon, Search, Sun, X } from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { AuthDialog } from "./AuthDialog";
@@ -8,12 +8,25 @@ import { TierBadge } from "./TierBadge";
 
 export function AppShell({ children }) {
   const { user, logout } = useAuth();
+  const [theme, setTheme] = useState(() => {
+    if (typeof window === "undefined") return "light";
+    const saved = window.localStorage.getItem("safaridesk-theme");
+    if (saved === "dark" || saved === "light") return saved;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState("login");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [search, setSearch] = useState("");
   const navigate = useNavigate();
   const location = useLocation();
+  const isDark = theme === "dark";
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", isDark);
+    document.documentElement.style.colorScheme = isDark ? "dark" : "light";
+    window.localStorage.setItem("safaridesk-theme", theme);
+  }, [isDark, theme]);
 
   function openAuth(mode) {
     setAuthMode(mode);
@@ -28,9 +41,13 @@ export function AppShell({ children }) {
     setMobileOpen(false);
   }
 
+  function toggleTheme() {
+    setTheme((current) => (current === "dark" ? "light" : "dark"));
+  }
+
   return (
-    <div className="min-h-screen">
-      <header className="sticky top-0 z-40 border-b border-neutral-200 bg-paper/95 backdrop-blur">
+    <div className="min-h-screen bg-paper text-ink transition-colors duration-200 dark:bg-[#0f1512] dark:text-neutral-100">
+      <header className="sticky top-0 z-40 border-b border-neutral-200 bg-paper/95 backdrop-blur dark:border-neutral-800 dark:bg-[#0f1512]/95">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-5 px-4 sm:px-6 lg:px-8">
           <Link to="/" className="flex shrink-0 items-center gap-2.5">
             <span className="grid h-9 w-9 place-items-center rounded-md bg-green-600 text-white">
@@ -61,6 +78,7 @@ export function AppShell({ children }) {
           </form>
 
           <div className="hidden items-center gap-2 md:flex">
+            <ThemeButton isDark={isDark} onClick={toggleTheme} />
             {user ? (
               <>
                 <NotificationBell />
@@ -103,7 +121,7 @@ export function AppShell({ children }) {
           <button
             type="button"
             onClick={() => setMobileOpen((value) => !value)}
-            className="ml-auto grid h-10 w-10 place-items-center rounded-md border border-neutral-300 bg-white md:hidden"
+            className="ml-auto grid h-10 w-10 place-items-center rounded-md border border-neutral-300 bg-white dark:border-neutral-700 dark:bg-neutral-900 md:hidden"
             aria-label="Toggle navigation"
           >
             {mobileOpen ? <X size={20} /> : <Menu size={20} />}
@@ -137,6 +155,7 @@ export function AppShell({ children }) {
               )}
             </nav>
             <div className="mt-4 grid grid-cols-2 gap-2">
+              <ThemeButton isDark={isDark} onClick={toggleTheme} compact />
               {user ? (
                 <>
                   <NotificationBell compact />
@@ -161,7 +180,7 @@ export function AppShell({ children }) {
 
       <main key={location.pathname}>{children}</main>
 
-      <footer className="border-t border-neutral-200 bg-white">
+      <footer className="border-t border-neutral-200 bg-white dark:border-neutral-800 dark:bg-[#111a15]">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-7 text-sm text-neutral-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
           <p>SafariDesk. Practical backend knowledge, built in Nairobi.</p>
           <nav className="flex flex-wrap gap-x-4 gap-y-2">
@@ -178,6 +197,23 @@ export function AppShell({ children }) {
         onClose={() => setAuthOpen(false)}
       />
     </div>
+  );
+}
+
+function ThemeButton({ isDark, onClick, compact = false }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center justify-center gap-2 rounded-md border border-neutral-300 bg-white text-sm font-semibold text-ink hover:border-green-500 hover:text-green-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:border-green-500 dark:hover:text-green-300 ${
+        compact ? "h-11 px-3" : "h-10 w-10"
+      }`}
+      aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+      title={isDark ? "Light theme" : "Dark theme"}
+    >
+      {isDark ? <Sun size={18} /> : <Moon size={18} />}
+      {compact && <span>{isDark ? "Light" : "Dark"}</span>}
+    </button>
   );
 }
 
@@ -199,7 +235,7 @@ function NavItem({ to, children }) {
 
 function MobileLink({ to, onClick, children }) {
   return (
-    <Link to={to} onClick={onClick} className="rounded-md px-3 py-2.5 font-semibold text-ink hover:bg-white">
+    <Link to={to} onClick={onClick} className="rounded-md px-3 py-2.5 font-semibold text-ink hover:bg-white dark:text-neutral-100 dark:hover:bg-neutral-900">
       {children}
     </Link>
   );
